@@ -1,0 +1,947 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Reporte de Biomasa</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <style>
+    :root {
+      --bg: #f3f7f7;
+      --card: #ffffff;
+      --ink: #1e293b;
+      --muted: #5b677a;
+      --brand: #0b6e4f;
+      --accent: #f59e0b;
+      --danger: #b42318;
+      --line: #dbe3ea;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Tahoma, sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 20% 0%, #dff7ec 0%, transparent 35%),
+        radial-gradient(circle at 90% 10%, #fff1d6 0%, transparent 30%),
+        var(--bg);
+    }
+    .wrap { max-width: 1400px; margin: 0 auto; padding: 24px; }
+    .head {
+      background: linear-gradient(135deg, #0f766e, #0b6e4f);
+      color: #fff;
+      border-radius: 18px;
+      padding: 24px;
+      box-shadow: 0 10px 26px rgba(11, 110, 79, 0.22);
+    }
+    .head-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+    }
+    .head h1 { margin: 0 0 8px 0; font-size: 30px; }
+    .head p { margin: 0; opacity: 0.95; }
+    .head-main {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .brand-logo {
+      height: 42px;
+      width: auto;
+      background: #ffffff;
+      border-radius: 8px;
+      padding: 4px 6px;
+      box-shadow: 0 2px 10px rgba(2, 6, 23, 0.18);
+    }
+    .grid {
+      margin-top: 16px;
+      display: grid;
+      grid-template-columns: repeat(4, minmax(220px, 1fr));
+      gap: 12px;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px;
+      box-shadow: 0 4px 12px rgba(2, 6, 23, 0.04);
+    }
+    .kpi-title { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+    .kpi-value { font-size: 26px; font-weight: 700; margin-top: 6px; }
+    .kpi-sub { color: var(--muted); font-size: 12px; margin-top: 4px; }
+    .charts {
+      margin-top: 18px;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(320px, 1fr));
+      gap: 14px;
+    }
+    .chart-card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px;
+      min-height: 320px;
+      position: relative;
+    }
+    .chart-card h3 { margin: 4px 0 12px 0; font-size: 16px; }
+    .section-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    .section-head h3 {
+      margin: 0;
+    }
+    .btn-max {
+      position: absolute;
+      right: 14px;
+      top: 10px;
+      border: 1px solid var(--line);
+      background: #ffffff;
+      color: var(--ink);
+      border-radius: 8px;
+      padding: 6px 10px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .btn-max:hover {
+      background: #f8fafc;
+    }
+    .btn-export {
+      border: 1px solid #1f7a4d;
+      background: #e8f6ee;
+      color: #0f5132;
+      border-radius: 8px;
+      padding: 6px 10px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      white-space: nowrap;
+    }
+    .btn-export:hover {
+      background: #d8f0e2;
+    }
+    .btn-export-top {
+      flex-shrink: 0;
+    }
+    .excel-icon {
+      width: 16px;
+      height: 16px;
+      border-radius: 3px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: #1f7a4d;
+      color: #ffffff;
+      font-size: 9px;
+      font-weight: 800;
+      line-height: 1;
+    }
+    .chart-panel {
+      min-height: 0;
+      height: 360px;
+      position: relative;
+      overflow: hidden;
+    }
+    .chart-panel canvas {
+      position: absolute;
+      left: 14px;
+      right: 14px;
+      top: 46px;
+      bottom: 14px;
+      width: auto !important;
+      height: auto !important;
+    }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border-bottom: 1px solid var(--line); padding: 10px; font-size: 13px; }
+    th { text-align: left; background: #f8fafc; }
+    .num { text-align: right; font-variant-numeric: tabular-nums; }
+    .tables {
+      margin-top: 18px;
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: 14px;
+    }
+    .muted { color: var(--muted); }
+    .premisa-box {
+      margin-top: 14px;
+      background: #f0faf6;
+      border: 1px solid #b8e0cf;
+      border-radius: 14px;
+      padding: 14px 16px;
+    }
+    .premisa-head {
+      margin: 0 0 8px 0;
+      font-size: 16px;
+      color: #0f5132;
+    }
+    .premisa-list {
+      margin: 0 0 10px 0;
+      padding-left: 20px;
+      font-size: 13px;
+      color: #1e293b;
+    }
+    .premisa-list li { margin: 4px 0; }
+    .premisa-note {
+      margin: 4px 0;
+      font-size: 13px;
+      color: #334155;
+    }
+    .trace-box {
+      margin-top: 18px;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px;
+    }
+    .trace-head {
+      margin: 0 0 8px 0;
+      font-size: 16px;
+    }
+    .trace-meta {
+      font-size: 13px;
+      color: var(--muted);
+      margin: 4px 0;
+    }
+    .trace-query {
+      margin-top: 10px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 8px 10px;
+      background: #fbfdff;
+    }
+    .trace-query summary {
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 13px;
+      color: #0f172a;
+    }
+    .trace-query pre {
+      margin: 10px 0 0 0;
+      white-space: pre-wrap;
+      font-size: 12px;
+      color: #0f172a;
+      background: #f8fafc;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px;
+      overflow-x: auto;
+    }
+    .chart-modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.75);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+      padding: 24px;
+    }
+    .chart-modal.is-open {
+      display: flex;
+    }
+    .chart-modal-content {
+      width: min(1200px, 100%);
+      height: min(88vh, 860px);
+      background: #ffffff;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      box-shadow: 0 20px 70px rgba(2, 6, 23, 0.5);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .chart-modal-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+      background: #f8fafc;
+    }
+    .chart-modal-head h3 {
+      margin: 0;
+      font-size: 16px;
+    }
+    .chart-modal-close {
+      border: 1px solid var(--line);
+      background: #ffffff;
+      border-radius: 8px;
+      padding: 6px 10px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    .chart-modal-body {
+      flex: 1;
+      min-height: 0;
+      padding: 12px 16px 16px;
+    }
+    .chart-modal-body canvas {
+      width: 100% !important;
+      height: 100% !important;
+    }
+    @media (max-width: 1080px) {
+      .grid { grid-template-columns: repeat(2, minmax(220px, 1fr)); }
+      .charts, .tables { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 640px) {
+      .grid { grid-template-columns: 1fr; }
+      .wrap { padding: 12px; }
+      .head h1 { font-size: 24px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <section class="head">
+      <div class="head-top">
+        <div class="head-main">
+          <img class="brand-logo" src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzc1IiBoZWlnaHQ9IjU4IiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHhtbG5zOnhsaW5rPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5L3hsaW5rIiB4bWw6c3BhY2U9InByZXNlcnZlIiBvdmVyZmxvdz0iaGlkZGVuIj48ZGVmcz48Y2xpcFBhdGggaWQ9ImNsaXAwIj48cmVjdCB4PSIwIiB5PSIwIiB3aWR0aD0iMzc1IiBoZWlnaHQ9IjU4Ii8+PC9jbGlwUGF0aD48Y2xpcFBhdGggaWQ9ImNsaXAxIj48cmVjdCB4PSIwIiB5PSIwIiB3aWR0aD0iNDc2MjUwMCIgaGVpZ2h0PSI3MzY2MDAiLz48L2NsaXBQYXRoPjxpbWFnZSB3aWR0aD0iMzc1IiBoZWlnaHQ9IjI0MCIgeGxpbms6aHJlZj0iZGF0YTppbWFnZS9qcGVnO2Jhc2U2NCwvOWovNEFBUVNrWkpSZ0FCQVFFQVNBQklBQUQvMndCREFBTUNBZ01DQWdNREF3TUVBd01FQlFnRkJRUUVCUW9IQndZSURBb01EQXNLQ3dzTkRoSVFEUTRSRGdzTEVCWVFFUk1VRlJVVkRBOFhHQllVR0JJVUZSVC8yd0JEQVFNRUJBVUVCUWtGQlFrVURRc05GQlFVRkJRVUZCUVVGQlFVRkJRVUZCUVVGQlFVRkJRVUZCUVVGQlFVRkJRVUZCUVVGQlFVRkJRVUZCUVVGQlFVRkJUL3dBQVJDQUR3QVhjREFTSUFBaEVCQXhFQi84UUFId0FBQVFVQkFRRUJBUUVBQUFBQUFBQUFBQUVDQXdRRkJnY0lDUW9MLzhRQXRSQUFBZ0VEQXdJRUF3VUZCQVFBQUFGOUFRSURBQVFSQlJJaE1VRUdFMUZoQnlKeEZES0JrYUVJSTBLeHdSVlMwZkFrTTJKeWdna0tGaGNZR1JvbEppY29LU28wTlRZM09EazZRMFJGUmtkSVNVcFRWRlZXVjFoWldtTmtaV1puYUdscWMzUjFkbmQ0ZVhxRGhJV0doNGlKaXBLVGxKV1dsNWlabXFLanBLV21wNmlwcXJLenRMVzJ0N2k1dXNMRHhNWEd4OGpKeXRMVDFOWFcxOWpaMnVIaTQrVGw1dWZvNmVyeDh2UDA5ZmIzK1BuNi84UUFId0VBQXdFQkFRRUJBUUVCQVFBQUFBQUFBQUVDQXdRRkJnY0lDUW9MLzhRQXRSRUFBZ0VDQkFRREJBY0ZCQVFBQVFKM0FBRUNBeEVFQlNFeEJoSkJVUWRoY1JNaU1vRUlGRUtSb2JIQkNTTXpVdkFWWW5MUkNoWWtOT0VsOFJjWUdSb21KeWdwS2pVMk56ZzVPa05FUlVaSFNFbEtVMVJWVmxkWVdWcGpaR1ZtWjJocGFuTjBkWFozZUhsNmdvT0VoWWFIaUltS2twT1VsWmFYbUptYW9xT2twYWFucUttcXNyTzB0YmEzdUxtNndzUEV4Y2JIeU1uSzB0UFUxZGJYMk5uYTR1UGs1ZWJuNk9ucTh2UDA5ZmIzK1BuNi85b0FEQU1CQUFJUkF4RUFQd0Q5VUtLS0tnc0tLS0tBQ2lpaWdBb29vb0FLS0tLQUNpaWlnQW9vb29BS0tLS0FDaWlpZ0Fvb29vQUtLS0tBQ2lpaWdBb29vb0FLS0tLQUNpaWlnQW9vb29BS0tLS0FDaWlpZ0Fvb29vQUtLS0tBQ2lpaWdBb29vb0FLS0tLQUNpaWlnQW9vb29BS0tLS0FDaWlpZ0Fvb29vQUtLS0tBQ2lpaWdBb29vb0FLS0tLQUNpaWlnQW9vb29BS0tLS0FDaWlpZ0Fvb29vQUtLS0tBQ2lpaWdBb29vb0FLS0tLQUNpaWlnQW9vb29BS0tLS0FDaWlpZ0Fvb29vQUtLS0tBQ2lpaWdBb29vb0FLS0tLQUNpaWlnQW9vb29BS0tLS0FDaWlpZ0Fvb29vQUtLS0tBQ2lpaWdBb29vb0FLS0tLQUNpaWlnQW9vb29BS0tLS0FDaWlpZ0Fvb29vQUtLS0tBQ2lpaWdBb29vb0FLS0tLQUNpaWlnQW9vb29BS0tLS0FDaWlpZ0Fvb29vQUtLS0tBQ2lpaWdBb29vb0FLS0tLQUNpaWlnQW9vb29BS0tLS0FDaWlpZ0Fvb29vQUtLS0tBQ2lpaWdBb29vb0FLS0tLQUNpaWlnQW9vb29BS0tLS0FDaWlpZ0Fvb29vQUtLS0tBQ2lpaWdBb29vb0FLS0tLQUNpaWlnQW9vb29BS0tLS0FDaWlpZ0Fvb29vQUtLS0tBQ2lpaWdBb29vb0FLS0tLQUNpaWlnQW9vb29BS0tLS0FDaWlpZ0Fvb29vQUtLS0tBQ2lpaWdBb29vb0FLS0tLQUNpaWlnQW9vb29BS0tLS0FDaWlpZ0Fvb29vQUtLS0tBQ2lpaWdBb29vb0FLS0tLQUNpaWlnQW9vb29BS0tLS0FDaWlpZ0Fvb29vQUtLS0tBQ2lpaWdBb29vb0FLS0tLQUNpaWlnQW9vb29BS0tLS0FDaWlpZ0Fvb29vQUtLS0tBQ2lpaWdBb3J4ejQ1L3RLYVI4Q2RUMHF6MVRTYjdVVzFDSjVrZTBLQUtGSUJCM0VldGVaLzhQRGZDZjhBMExHdC93RGZVUDhBOFZYSFBHVUtjbkNVdFY2bjBXRjRkelhHVVkxOFBRY29TMmQxNmR6NnZvcjVUVC9nb1I0UmtkVVh3enJyc3hBQUFoSko5QU45ZTIrQVBpSnJmanBJcm1id1RxdmgzVHBGM0xQcThrVWNoSC9YSUV1UHhBcDA4WFJxdmxnN3YwZitSbGpNanpEQVE5cGlxWEl2TnhWL1RXNytSMzlGRkZkWjRRVVZoK05mRkVIZ253anJHdjNNTWs5dHBsckpkeVJRNDN1cUtXSUdjRFBGZk4zL0FBOEw4SWY5QzFybi9rSC9BT0xybXE0bWxSZHFrckhzNEhKc2ZtVUhQQ1VuTkoyZHJiL05uMWJSWGl2d1QvYWgwUDQ0K0k3N1NOTDBuVWRQbXRMVTNieVhubDdXWGVxNEcxaWM1WVY3VldsT3JDdEhtZzdvNDhaZ3NSZ0tyb1ltSExKZEg1aFJSUldweEJSUlh5UCsxRCsxUjRsMFQ0MWVFdmdaOE1aYkN5OGJlSVdqTjNyMnBSK2JGcFVUNUs3SWp3OG14V2ZEWkdOb3dTM3lzUjljVVY4N1gzd08rTXZoblRXMUh3dDhjOVMxenhERXBmOEFzL3hacGRwSnBsNndCL2RzSVkwbGdVbkh6SXhJOURVUDdIdnhsOGNmR0s4K0pzdmozUzE4TzZ2b211UjZVTkNpTzZPeTJXNmI5ckhsdDdsbjNaSUlLNEpITkFIMGZSWGwzN1JIeDcwbjluendJbXVYMGFYK3BYdDNEcCtsNlY1d2llOXVKSENoUVNEaFZCTHNjY0JmVWdIMUdrTUtLS0tBQ2l2aG4vZ29sOGYvQUlxZnN5MzNoald2QnZpMkZkSzE1NW9HMG05MHUzbEZxOFN4bmNraFhjd2JlY2hpY0VESEhGZlFQN0h2eEoxLzR2ZnMzK0MvRi9paTVpdk5kMU9LNGU1bWdoV0ZHSzNNcUxoRjRIeW9vNDZrWnBpUFphSzhzMVA0K2FSYmZ0Q2FKOEpiSlV2dGJ1dEx1TlcxQjFseDlnaVRhSWxJeHk4aFluR1FRb0IvaUZlcDBoaFJXWjRuOFI2ZjRPOE42cnIyclhDMm1sNlpheTNsMU8vU09LTlN6dCtBQnI0eCtBWHhNK0ovN2M5OTRuOFU2ZjQzdXZoWjhPZEx2MjAzVDlMMEsyZ2wxRzVrQ0k1ZWVlVkhDNFYxT0VHQ1hJL2h5ekVmY05GZkUzN1N2alA0L2ZzcGZEYlY5WXNmRTlwOFNmQ3MwZjJVNnpxZW54MjJyYUM4bUk0NW1NT0lwMEROMUtBaG1RSEl6bjdTc25MMlZ1MjR2dWpVN202bmpyUUJQUlJSU0dGRkZGQUJSUldSNG8wblVOWjBtUzIweldyancvZHNRVnZyYUdLWjFBN2JaVlpUbjZVQWE5RmZrTjhaL3dCdmY0L2ZDSDR3K0ovQW84WmFicWlhTnFMMktYOG1oMjZQTW9QeXV5Z1lEWUl5QnhucFgzVWZnLzhBdEZDMkUwSDdSV25YRXBVTXNVL2dPMVJDY2RDd21KQS9DbUs1OUgwVjhwZnN6K08vamNuN1FIam40ZS9HRFU5TjFFYVhwTUdwYVpQcHRwSERGZFJTVE1nbVVxQTJQbFpTcmRHVS9VL1Z0QUJSUlJTR0ZGRkZBQlJSUlFBVVVVVUFGRkZGQUh3ei93QUZFdjhBa2FmQnYvWG5jZjhBb2ExOGkxOWRmOEZFditScDhHLzllZHgvNkd0ZklqZERYeGVNL3dCNG42bjlSOEkvOGlURCtqLzlLWjl1ZnNRZkFXeVhSWXZpSHJscXR6ZXp5TXVreHlqS3dJcDJtYkg5OHNHQVBZREkrOXg5S2ZGUDRvNko4SXZDVSt2NjdMSXR1akNLS0dKUTBzOHB6aEVHUnljRThrQUFFOXFUNE9hZEJwWHduOEhXMXNvV0dQU0xYR08rWWxKUDRray9qWEFmdGJmQ0hVL2k1OE5VZzBWUkxxK21YSXZZTFptQy9hQnRaV1FFOEJzTmtaN2pIZXZvb1FlSHd2N3BlOWEvelB3M0U0dW5uT2U4MllUYXBPZHY4TVU5RjVlYjgyenhpNi80S0tYUDIvOEEwYndSSDloQjZTNmlmTkkrb2p3RCtkZlEvd0FFUDJnZkR2eHgwdTRrMHp6TExWTFhIMnJUTG5IbXhnOUdCSERvZW1SK0lHUm44dTlXMGkrMExVSnJEVXJPZlQ3MkJpc2x2Y3htT1JENkZUeUs3MzlucjRvd2ZCNzRvNmQ0aXZVdVp0T1NLYUM3aHRBREpJam9jQUFrQTRmWTNKL2hyeDZHUHF4cUwya3JycWZxV2I4RjVkVndNcDVkVDVhaVY0MmJmTjVhdHJYbysva2ZvMThmL3dEa2lIanYvc0RYWC9vcHEvSjBkSysydmlYKzI3NEs4YWZEenhMb05wcE91UlhlcGFmUGFRdk5ERUVWM1FxQ3hFaE9Nbm5BcjRsRkxNS3NLMVNMcHUraHZ3UmwyTHk3QzFvWXVtNE55dXIraDlTLzhFOS8rU29lSS84QXNESC9BTkh4Vjk5MThDZjhFOS8rU29lSS93RHNESC8wZkZYMzNYclpiL0ErYlB6VGpuL2tkVC93eC9JS0tLSzlVK0FDdnlKLzRLZ2ZEWHhaOE0vMmtiVDRyNlUxM2I2ZHE2MnN0cHE5cVNQc1Y5YnhxZ1RjUHVOaU5IWFBYTFl6dE9QMTJyekhUZkYvaHo0eWVKL2lkOE50YTBpMHYwOE4zRnJaMzlqZUJabzdxQzV0STU0NUNoSEFKYVJmckVTRFRFZkQzN09uL0JXMkZvN1RSZmpCcFRSeUtBaDhUYVJGdVZ1dnpUMjQ1SGJKanoxKzRLKzhQQUdsZUZ0UW04UStQL0JPb1crcm54aXR2ZHlYVVZ5SkxTZVNHQVF4c3UwSGI4cXFyZFQ4dlRJcjRjL2FkLzRKUTZaYzZmcVBpSDRPM010bGZScTB4OExYc25tUXpZNUtXOHpIY2pZNks1WUUvd0FTaXVGLzRKRWZFVFg5SStMUGl6NGR6bWYreGJuVFpOVGV6bXlQc3QxRExIR1dDbjdwWlpDcmRNbEV6MHBpUEcvMnlmRWZ4TjFYOXJsZEk4YjYzcG1vYTlwRjNaUjJFR25lWi9abGtKUkZLcVJxNERFWmRkN0VibUk5QUFQMWkrSHQ1OFQvQUFUcHZpWFd2akw0aThIeTZIWTJ2MnFLNDBDMW50eGJKR0hhWjVqS1RsUW9CR1BRMStXUDdjMy9BQ2tJMWovc0k2Ui82VDIxZnBML0FNRkJKZFFoL1k4K0pMYWJuempad3JKdDYrU2JtSVMvK09GcysyYUFQRWZndCsxSjhVLzIydmlqNHEwNzRmNjlaZkN6d1RvTUtTQzlmUzQ5UzFDNUx1eXhiaEtmTFhjRVppQVBsQXhsaWR3M1BnUCsyNzRndGYyaDlaK0JueGRUVG04UjI5KzlocG5pTFM0akJEZVNBYmtXV0lraEdrWEJVcVFNa0tSbm12S1ArQ01jRVl0L2l4Tng1dS9URS9ERnlhK2R2Mm81cm1QL0FJS01hekpZRnZ0cStLTk5NQlRxSkFMZmJqM3ppZ0Q2ZC80TE1mOEFJcC9DL3dENi9yLy9BTkZ3MTYzK3lwSjQxaS80SjYrQ1grSDl4bzFsNGpXenVqSGRhNnNqMjhFWXU3Z3U0VkFTemdmZEIrWFBYSTRQa24vQlpqL2tVL2hmL3dCZjEvOEEraTRhOSsvWVovNU1ROEdmOWd1Ly93RFNtNG9IMVB6ai9ZWjEzNG9lUC8ycGI3V1BDK3U2Vko0NDFEVHJ5NHVkUzhWUnkzRVVxa29YSkVaRGJzN2NkZ0JqR09LL1pYNGMyM2l5MDhHYWJGNDR1OUx2L0ZLaC90dHhvc0x4V2pIekdLZVdya3NNSnNCejFJSjRCeFg1Qy84QUJLRC9BSk92ai83QWQ3L09PdjJmcE1FY1A4Y1BBTTN4VStEdmpQd2hiWEMydDFyV2szTmpCTS8zVWtlTWhDM3R1eG4yelg0bmZCTDlvZjRuL3NSL0VQV3RMZ3REYk90d0lOYThNNnVoOHFSMFBYZzVSOEU3WkZPQ0NEOHd4WDdiZkdUNGhqNFMvQzd4TDR5YXhPcFI2Slp2ZXZhcSt3eUltQ3dCd2NIR1RYRGZIRDlsejRYL0FMVkhoKzJ1dkVPbHh6M2N0dXIyUGlMVEdFVjJrYkxsQ3NtTU9tR3lGY012UFNnR2VZZkNIOXM3NFNmdHBlRTlTK0htdGlYd3pyZXZXY2xoY2FEcUVvQnVBNkVOOWxuQXc3REpJeUZmSXlGNHpYMFQ4U1BpSG9Qd1ArR09xK0t2RU4wOFdpNkhhQjVISkJsbEl3cVJybkFMdXhWUU9Nc3c2VitNdjdYZjdGUGlmOWtYVmRPMW1EVlRyWGhXOHVpbGhyTUNtR2EzbkdYU09WUWZsZmFwWldVNE8xandSaXZwMzlyTDRqZUkvaVQvQU1FeHZodjRpMVNXUzQxRFU3NnlqMVM0WVlhWVJyY0o1alk3dThTTWZjMEN1ZW0vQ3Y0d2ZIajlxTDRhZUxQaWg0WDhTYVY4UGRKMCthZE5DOE5uU283NGFoNUtCbUZ6Y1NmTW9ZNVFHTUxnNU9NQUJ2VC9BTmlMOXIyMy9hcCtIdDljNmphd2FUNHQwTmtpMWExZ0o4bHc0SlNlTUVraEcydU5wSktsU01rWUorZC8rQ2RmZzd4bDhSLzJiRGIrRy9qSHFIaFN4c2RTdTdLNDBXMTBPd3VSRXo0azNlWk5Hem5jSk05Y0E1QTZWOUFmc3Evc042Sit5bDRvMXZWOUc4VmFwcmk2dFppem10TDZHSkVHMXc2dmxSbkkrWWVuekdnRHpINGUvdG1lSWYydVBqUDRnOENmRGp4WnB2dzAwdlQ0WG0wL1VyelNQN1N2dFhWRzJzNkk3ckZFbzRiYXdaaXB6Mk8za1BobCszZjhSL2g5KzFWTjhHL2lwY2FWNG9zMzFoZEVUWE5QdFBza3NVcnNGaGsyTDhwUmk2QmxJeXVTUXgyNEx2RHV2L0RUUWYyb3RUOEpmc3grQnRNdXZpSmVlZEhxZml6VUo1bjBqUm9RMytrdEJEditmREVENU5xNUtxcEtrMThvK09kS3Y5RS80S0wyTmpxbXRYSGlQVW9QRytscmNhcmRReHd5WE1ubndibUtSZ0lvejBWUmdBQ21CKzRsRkZGU1VmZ1grMmV3WDlyMzRsa2tBRFhaQ1NlMzNhL1RyOW9yOXRid0xwZmhyUVBDdmdMeHpZYTM0dThRYXJwOWhETjRldTF1Ulp3dGN4ZWRJOGlFcXVZOXlBWjNFdU9NQTQvTWI5czcvazc3NGxad1IvYjBuQi80RFg2bS90Ty9zb2VFZkZuaGJSL0ZuaG53YlkybmpiUWRVMDNVTGViUjdOWVpibUpMbUx6bzNXTURlUExMc01qSUtqQkF6VkVuMFcvaExTRThYLzhBQ1Z0YkJkYVRUenBwdTk1SCtqZVlKTmhHY2ZlR2M0ejFyNHk4QWZ0bWEvOEF0YWZHcnhCNEQrSEhpelRmaHJwZW53eVRXR3FYbWtmMm5mYXVxTnRkNDBkMWlpVUQ1dHBETVZPZXgyL2M1NUdPeHI4N05DMTc0YWFCKzFMcWZoTDltWHdOcGwzOFI3enpvOVQ4V2FoUExKcEdpeEEvNlMwRUlmNXlDUU1KdFhjVlZTUVNLUXlMNGJmdDNmRWo0ZC90VnkvQno0cVhHbGVLYko5WVRSRjF2VDdQN0pORkxJUUlaZGkvS1VZdWdaU01ya2tNZHVHK2x2MjIvaW40NCtCdndadmZIL2d6VWRMaWJTSllVdXRQMVN3YTRXNldXWklsS3VzaUZHVXZudUNNOU9LL0x2NGk2WHFPaGY4QUJSQzJzZFUxeTQ4UjZuQjR6MHRialZibUNPQjdtVHpZQ1c4dU1CRkdUZ0JSd0FLL1NUL2dwbC95Wm40NC93Q3V1bi8rbHNGTVI0TjhELzhBZ29IOFdmaTM4TC9GVVdqZUZiSHhoOFVrblA4QVp1bGFUYVBGQmFXYXhxWkx1NDNQaGh2WlZSQXdaMk9BRGcxNmYreFA4Wi9qbjhmdkFIeEFYeGpIRjRkMWV4bmhpMFhYTDNSakdubXR2TXNUMitVOHhVMng4Z2cvdk9wSXJ6UC9BSUkxYU5heCtDdmlUcW9pWDdiTnFGcGF0TGpueTBqZGdQemtZMStqUHBTWXo4dXZnTi93VWcrTmZ4RitNRnA0T3VQREdpZUk3dTZGeGIyK242VmJQYkY1MVJ0cnlUUEl3amhVZ3U3YlNkcW5BelUzeDIvYk8vYVIvWlQrTXVtNlQ0N244SjY5cDkzYXhhai9BR2ZwTm95V3NzRE95dWtjckFTcXdaSFVGdDNSVGdnNHJ4Zi9BSUp3RWo5dVRTd09BWTlVL3dEUk10ZDMvd0FGaXY4QWt0M2duL3NYZi9ibWFtSTk5L2FGL2FLL2FESHdndXZpOTRCMDdSL0IzdzRnUzNudHJmVjRSUHJkNWJ5dUZGMDhaRFJSeHNYUXFnSmZhZHhQWWVuZnNCZnRVYXYrMUY4TXRXdS9FdHJhMi9pVFE3d1dsMUxaS1VpdVkzWGRISnNKT3h1R1VnRWpLNUdNNEdKKzBHYy84RXk1eWVUL0FNSWJwUFhudGJWNHYvd1JrY25RUGlxdWZsRnpwcEEvNEJjZjRDbDBBL1NTaWlpa1VmRFAvQlJML2thZkJ2OEExNTNIL29hMThpMTlkZjhBQlJQL0FKR3J3Wi8xNTNIL0FLR2xmSXRmRjR6L0FIaWZxZjFId2oveUpNUDZQLzBwbjZJZnNiZkhEVHZHL2dHdzhKM3R5c1hpUFJJUElFTWpmTmMyNjhSdW5ydFhDc09vd0QzRmZSL0JIclg0ejZmcVYxcEY5QmVXTjFMWjNrRGg0cmlDUXBKR3c2RldISU5mU1h3NC9idjhZZUdZNGJYeExaVy9pbTBUQytmdSt6M1dPbkxBRlcvRmNudWE5UEM1akdNVlRxOU92K1o4RnhCd1JYcVY1NHJMV21wTzdpM1pwdmV6MnQ1TzFqN2o4WC9EencxNCt0dkk4UTZIWTZ2R0JoVGRRcXpvUDlsdnZMK0JGZUErT3YyQi9CdXRpV2J3M2YzM2h5NWJKV0ptKzAyNFBZYldPOGY5OVYxSGdiOXRMNGJlTDJqaHU3K2J3M2R2ajkzcXNleE0vd0RYUmNxUHFTSzl4c3I2MjFLMWl1YlM0aXVyYVZRMGMwTGgwY2VvSTRJcjB1VEM0dlhSL24vbWZBUnhHZDhQVFVienBlVHZ5djVPOFdmbHI4WHYyZC9HUHdZazg3V0xOTHZTR2ZaSHF0aVM4Qko2QnNnRkc5bUF6Mkpyekt2MlExdlJMSHhIcEYzcG1wMnNWN1lYY2JSVDI4eTVWMVBCQnI4by9qTDRBUHd2K0ozaUR3MEdkNExLNHpicy9MTkM0RHg1UGM3V0FQdURYZzQzQ2ZWbXBSZDRzL2FPRk9KNTUycFlmRXBLckZYdXRtdHIyNk5hWDlkRDNIL2dudjhBOGxROFIvOEFZR1AvQUtQaXI3N3I0RC80Sjd0ajRwK0loNjZLeC84QUk4VmZmbGV4bHY4QUErYlB5L2puL2tkVC93QU1meUNpaWl2VlBnQXI0bzhTL0FQNDU2ZisxOTQrK0wvdyt1OUhzTk9sV3hzNDlIMXU0WVJhL0FsckNKZ2ZMRGVWdGRTRWRzSGNwL2hKM2ZhOUZNUjg4MzN4MytNZHhwSnN0Ty9aODFpRHhVNmhGTjlydGdkTGhjOEZ6Y0xMdmRGNU9CR0dZREhCUEdiK3hwK3lLMzdPMW5ydmlUeExxRU90ZkVYeFBJWnRWdkxaY1FXNExtUXd4WkFKQmRpek5nWklYQUFVWittS0tBUHptL2JpL1lPK0l2eEcrT2FmRkQ0YkxaYXZjWFl0cExuVGJxNGp0NUlKNEZSRmRUSVFqb1ZSU1FTQ0NEd2NpdnJ2d1I0TDhiZVB2Q2ZpUlBqRi9admwrSXJJYWUzaFRTR01sblkyNVJsa0ptSTN5U3lGeVNjN1ZDb0Y1Qlp2WHFLQVB6Ly9BR2VmMmR2aWord3g4VVBHTDZKNFNtK0tYZ1BYNDQwZ3VOSnZyZTN2b0RFek5FWllwblJTY1NPcmJTUjBJeDkyclh3Si9ZbThYZUsvMmx0UytPL3hkc2JIUkxtWFVXMVBUZkNsdGNMZFBETndJV21sWDVQM1FDa0JTU3pxQ2RvRzAvZTFGQVdQaHY4QTRLR2ZzOC9GWDlwNi93RERXamVFUERGbW1rYUE4MDUxVysxV0tNM2J5ckdOcVIvZVVMc09TM1VrWTZjK3Yvc2FlQVBHdnc0K0JHbmZEang1NGJpMG1YUm9wcmVPL3ROUWp1SXIyT1dXU1FrS3Z6UnNvazJuSXdjWkI1d1BvV2lnRDh3UGczK3hEOGQvMldQMmluOFFlQmROOFBlTE5FOHE0czROUTFYVUJieG0za0EybVZCKzhWMUlVbllyQTdTQjF6WDZRZUJOSTFqUWZDV25XWGlIV204UTY1R2hhODFJd3JDczByTVdiWkd2Q0lDMjFWNUlWVkJKT1NkK2lnRHpIOXAzd3BxM2pyOW4zeC80ZDBLeWJVZFoxVFNKN1MwdFVaVk1ranJ0VVpZZ0RrOVNSWGh2d08wRDlvSDlsandScFBoVFd2RHRqOFgvQUF2WndxbHRONGYxRkxmVWROR0NUQ1V1ZGl6eEtjQmNNR0FPTVlBQy9ZRkZBSHhkOGQvaHQ4Vi8yMmswUHdqcUhoR1g0VWZEZTB2azFEVXI3V2J5M3VOVHZXVU1xcERCQ3pxZ0FadVhia2tIK0hEZTYvRWY5bW53cDQvL0FHZVovaENrTGFab0VlbnhXZW55Sjg3MmJ3N1RCTHljc1F5cVd5Zm0rWUUvTWE5Y29vQS9LYjRMZnM1L3RhZnNnZkVYVUU4Q2VIZE04UzZScUxKRmNsNzJGdE91MVZqc2taWGxqa2paUVR6Z0VCaU9hKzhmaFQ4Sy9HY2x0cnZpZjRtYTdiM2ZqelhySCt6eEZvZ2RMRFJiVEJJZ3RsWTVadDVMdkszTEVLUHVvTSswVVVCWS9LbjRDZnNHL3RKL0FYNDNQcXZoVFVkQTBlMWpXU3lmWDdxWlo3ZTZ0SFlaL3dCSEdaQ2ZsUmdwQy9NbytiSE5XdmluL3dBRSsvamhaL3RPV3ZqcncxZVdYanBQN1V0TllHdWExZFEyckc0ak1ic0xpRkF1Rjh4Q0FJZ2ZrMjlEWDZtVVVYQ3hrK0ZMZldyWHc1cDhYaUs4dEwvWEJFRGVYRmpBME51MHA1YnkwWm1JUWRCa2s0QXljMDN4VnEycDZMcEQzT2thSEw0aHZRd0MyTU54RkF6QTlUdmtJVVkrdGJGRklEOGpQakwvQU1FL2ZqOThYdmk3NG44ZGY4STFvbWxIV3RRZStXeGJXbzVEQUNmbFF0Z2JpQUJrZ0FFNXhpdjFEK0d2aUR4VHIyakErSy9DQjhJNmpDa2F0QXVvdzNrY2pZK2J5M2pPZG9JNDNCU2M5T3RkaFJUQ3hVMWF3T3A2VmVXUW1lMk54QzhJbWorOUh1VWpjUGNaelg1YWZBYjlnejlwTDREZkc5OVY4SjZqb0drV3NTeVdiYS9kVExQYjNOcTdEUDhBbzR6SVQ4cU50SVg1bEh6WTVyOVZxS0FQeXorSy93RHdUNitPRnY4QXRNMnZqbnc1ZldQanREcVZwcS85dDYzY3hXckc0ajh0MkZ4Q2dYQ2IwSUFpQitUYU9EWDFYKzE3OE0vaW44WFAyY0UrSG1sNlZwdmlQeEpyQmdmVmRYaXVVc0xPMWFLWkppSTRwR1oyQks3RkdTY0RMSFBCK29hS0xoWStKdjhBZ250OEJmaWorekpENGc4T2VML0MxcTJtYTFjcGVMcTlqcXNNb3RtU01yc2VMaGp1K1hCWFBmSUZmWWZpdlV0VTBmdzdmWHVpNk9mRUdxd3g3cmZURnVVdC90RDVBMitZL3dBcSt1VDZkRFd0UlFCK1hQN01QN0ZueDErQVg3UVdrZkVPL3dEQ3VsYXJaUXlYQzNWbGFhekVzbmx6bzZFb1c0eXBjTmc5UXVNak9hNjc5dkw5a3o0eGZ0US9GMnoxZnc3NFkwNnkwVFI3SCt6YmU0dk5XaUVsNWlSNUROc0gzRk84QUtlZmxKUFhBL1JpaWk0V1BrUDRuK0FQaTU0NC9ZdnNmaGRhZUE3UzI4VXoyRnRvbDNKTHJVSDJhQ0syRVA4QXBLc09XRW5sa0JPQ3Vja25Benl2L0JPLzluUDRwL3N3YXQ0cDByeGY0YXNtMGp4QjVFbzFTeTFTS1EycndMTGhXais4d2Z6QUFWNkZlUnprZmMxRkFXQ2lpaWtNK0YvK0NpUC9BQ04vZzRkdnNNLy9BS01XdmtldnJmOEE0S0kvOGpoNFAvNjhKLzhBMFlLK1NLK0x4bis4VDlUK3BPRXYrUkpodlIvK2xNL1J6OWtyd1g0ZTFqNEErR2JxL3dCQjB5OXVuKzBCcDdpeWpkMnhjU0FaWXJrOGNWNFArM2I4TGw4TCtMTkc4U2FYcDBObm9sN2JDemtGcENzY2Nkd2hZaklVQURjcDQ5ZGplbGZTWDdHLy9KdXZoYjYzUC9wUkpYcW5pYnd2cFhqSFJiblNOYXNJTlMwNjVYYkxienJsV0djajZFSGtFY2c4aXZlV0dqWHdrWXJSMldwK04vMjFWeWZpR3ZpSGVVRk9hYXYwY250NXJkSDQ2MTlPZnNJK09OZnMvaWgvd2pFRnhOUG9GNWF6VHoyckV0SEE2QUZaVkg4Skp3cHgxM0RQSUZleWFwL3dUOThDWGQrWnJUVjlic0xZblAyWkpZM0Mrd1prSi9QTmV2ZkNmNEdlRXZneFozRVhoMnlkYm01d0o3NjZmeko1UU9nTGNBRDJVQVZ3WWJBVjRWWXpsb2tmWTU5eGhsV095NnBocVVYT1UxWkpxMW4zdjNXNnRmVTlDSndNMStaSDdZMnJXK3JmdENlSkRic0hXM1czdG1ZZjMxaFRkK1JKSDRWOTQvSEQ0emFSOEYvQmx6cXQ3SkhOcU1pbE5QMDh0ODl6TmpnWTY3QmtGbTdEM0lCL0xEV2RXdTlmMWU5MU8vbU54ZlhzNzNFOHJkWGtaaXpIOHlhMXpTckZxTkpiN25CNGU1ZFY5dFV6Q1N0QzNLdk50cHUzcGI4ZkkrbVArQ2ZIL0pWUEVQOEEyQlcvOUh4VjkrMThCZjhBQlBqL0FKS3A0aC83QXJmK2o0cSsvYTdNdC8zZjVzK2M0NS81SFUvOE1meUNpaWl2VVBnQW9vb29BS0tLS0FDaWlpZ0Fvb29vQUtLS0tBQ2lpaWdBb29vb0FLS0tLQUNpaWlnQW9vb29BS0tLS0FDaWlpZ0Fvb29vQUtLS0tBQ2lpaWdBb29vb0FLS0tLQUNpaWlnRHgzNDRmczA2TDhkZFYweSsxWFZiL1Qzc0lYaFJMUFpoZ3pBa25jcDlLODEvNGQ1ZUQvOEFvWnRjL3dESVAveEZmVmxGY2M4SFFxU2NwUjFmcWZSWWJpSE5NSFJqUXc5ZHhoSFphZXZZNUg0Vi9EcTArRlBnYlQvREZoZFQzdHBaR1RaTmNnZVkyK1JuT2NBRHF4RmRkUlJYVkdLaEZSanNqd3ExYWVJcVNyVlhlVW0yMzNiM0NzN1dyTzl2OVBtaHNMODZaZE9NSmRMQ3NwVDNDdHdmeHJSb3B0WFZqT0xjV3BMcDh6NXE4Vi9zU2FWNDYxbVhWdkVIamp4SHF1b3lqRFQzRFFuQS91cU5tRlgySEFyR1AvQlBMd2puanhQclkrcXcvd0R4TmZWMUZjTHdPSGVyaitML0FNejZpSEZHY1VvcUVLN1NXeVNqWmZnZUovQkw5bHZSZmdkNGx2ZFowdldkUTFDVzZ0RGFORmRoQW9VdXI1RzBBNStRZm1hOXNvb3JxcDBvVVk4c0ZaSGg0ekc0ak1LcnI0cWZOSjlmVDBDaWlpdFRpQ2lpaWdBb29vb0FLS0tLQUNpaWlnQW9vb29BS0tLS0FDaWlpZ0Fvb29vQUtLS0tBQ2lpaWdBb29vb0FLS0tLQUNpaWlnQW9vb29BS0tLS0FDaWlpZ0Fvb29vQUtLS0tBQ2lpaWdBb29vb0FLS0tLQUNpaWlnQW9vb29BS0tLS0FDaWlpZ0Fvb29vQUtLS0tBQ2lpaWdBb29vb0FLS0tLQUNpaWlnQW9vb29BS0tLS0FDaWlpZ0Fvb29vQUtLS0tBQ2lpaWdBb29vb0FLS0tLQUNpaWlnQW9vb29BS0tLS0FDaWlpZ0Fvb29vQUtLS0tBQ2lpaWdBb29vb0FLS0tLQUNpaWlnQW9vb29BS0tLS0FDaWlpZ0Fvb29vQUtLS0tBQ2lpaWdBb29vb0FLS0tLQUNpaWlnQW9vb29BS0tLS0FDaWlpZ0Fvb29vQUtLS0tBQ2lpaWdBb29vb0FLS0tLQUNpaWlnQW9vb29BS0tLS0FDaWlpZ0Fvb29vQUtLS0tBQ2lpaWdBb29vb0FLS0tLQUNpaWlnQW9vb29BS0tLS0FDaWlpZ0Fvb29vQUtLS0tBQ2lpaWdBb29vb0FLS0tLQUNpaWlnQW9vb29BS0tLS0FDaWlpZ0Fvb29vQUtLS0tBQ2lpaWdBb29vb0FLS0tLQUNpaWlnQW9vb29BS0tLS0FDaWlpZ0Fvb29vQUtLS0tBQ2lpaWdBb29vb0FLS0tLQUNpaWlnQW9vb29BS0tLS0FDaWlpZ0Fvb29vQUtLS0tBQ2lpaWdBb29vb0FLS0tLQUNpaWlnQW9vb29BS0tLS0FDaWlpZ0Fvb29vQUtLS0tBQ2lpaWdBb29vb0FLS0tLQVAvWiIgcHJlc2VydmVBc3BlY3RSYXRpbz0ibm9uZSIgaWQ9ImltZzIiPjwvaW1hZ2U+PGNsaXBQYXRoIGlkPSJjbGlwMyI+PHJlY3QgeD0iMCIgeT0iMTE1NTkzMCIgd2lkdGg9IjQ3MjIxODIiIGhlaWdodD0iNzM2NjAwIi8+PC9jbGlwUGF0aD48L2RlZnM+PGcgY2xpcC1wYXRoPSJ1cmwoI2NsaXAwKSI+PGcgY2xpcC1wYXRoPSJ1cmwoI2NsaXAxKSIgdHJhbnNmb3JtPSJzY2FsZSg3Ljg3NDAyZS0wNSA3Ljg3NDAyZS0wNSkiPjxnIGNsaXAtcGF0aD0idXJsKCNjbGlwMykiIHRyYW5zZm9ybT0ibWF0cml4KDEuMDA4NTQgMCAwIDEgMCAtMTE1NTkzMCkiPjx1c2Ugd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIgeGxpbms6aHJlZj0iI2ltZzIiIHRyYW5zZm9ybT0ic2NhbGUoMTI1OTIuNSAxMjU5Mi41KSI+PC91c2U+PC9nPjwvZz48L2c+PC9zdmc+" alt="SSF" />
+          <h1>Reporte de Biomasa</h1>
+        </div>
+        <button type="button" class="btn-export btn-export-top" id="btnExportAll" data-file-name="reporte_biomasa_completo">
+          <span class="excel-icon">X</span>
+          Exportar todo en Excel (5 hojas)
+        </button>
+      </div>
+      <p>Periodo: <strong>01/05/2026</strong> a <strong>31/05/2026</strong></p>
+      <p class="muted">Entradas/salidas/cajas por regtime (proc_packs/proc_matxacts). Salida = material con pkpackaging distinto de 3 (o sin pkpackaging) en dbo.proc_materials. Stock/arrastre por fdespesque (vw_stolt).</p>
+    </section>
+
+    <section class='premisa-box'><h3 class='premisa-head'>Premisa de entradas de biomasa</h3><ul class='premisa-list'><li>Material con pkpackaging = 3 en dbo.proc_materials.</li></ul><p class='premisa-note'>Cajas = consumo TINA en proc_matxacts (xactpath=1), solo nombre con &#x27;tina&#x27;.</p><h3 class='premisa-head'>Premisa de salidas de biomasa</h3><ul class='premisa-list'><li>Material con pkpackaging &lt;&gt; 3 o pkpackaging NULL en dbo.proc_materials.</li></ul><h3 class='premisa-head'>Premisa stock / merma (proc_packs)</h3><ul class='premisa-list'><li>Solo materiales de entrada (pkpackaging = 3) en dbo.proc_packs.</li><li>Stock: rtype &lt;&gt; 12 (o NULL).</li><li>Merma: rtype = 12.</li></ul><h3 class='premisa-head'>Premisa cruce BC (salidas con/sin pedido)</h3><ul class='premisa-list'><li>Clave de enlace: dbo.proc_packs.number (codigo de lote/caja) = bc.[Item Ledger Entry].[Lot No.].</li><li>Ventas BC: Item Ledger Entry (Entry Type = 1); kilos BC = campo [Kilos] (valor absoluto).</li><li>Pedido desde Sales Shipment Line ([Order No.]) del mismo [Document No.].</li><li>Con pedido: [Order No.] informado en el albaran BC.</li><li>Sin pedido: [Order No.] vacio o NULL.</li><li>Cruce kg: peso salida Innova (proc_packs.weight) vs [Kilos] BC en lotes enlazados.</li></ul><p class='premisa-note muted'>Documento canon: PREMISAS.md</p></section>
+
+    <section class="grid">
+      <article class="card"><div class="kpi-title">Entradas de biomasa (kg)</div><div class="kpi-value">693,480.32</div><div class="kpi-sub">2940 packs · Stock+Merma</div></article>
+      <article class="card"><div class="kpi-title">Stock en entradas (kg)</div><div class="kpi-value">280,837.32</div><div class="kpi-sub">pkpackaging=3, rtype distinto de 12</div></article>
+      <article class="card"><div class="kpi-title">Merma en entradas (kg)</div><div class="kpi-value">412,643.00</div><div class="kpi-sub">pkpackaging=3, rtype=12</div></article>
+      <article class="card"><div class="kpi-title">Cajas (kg)</div><div class="kpi-value">405,067.00</div><div class="kpi-sub">1592 movimientos</div></article>
+      <article class="card"><div class="kpi-title">Diferencia (kg)</div><div class="kpi-value">288,413.32</div><div class="kpi-sub">% diferencia: 41.59% · Entradas - Cajas</div></article>
+      <article class="card"><div class="kpi-title">Salidas totales kg (todos los graders y basculas)</div><div class="kpi-value">469,946.62</div><div class="kpi-sub">79233 packs</div></article>
+      <article class="card"><div class="kpi-title">Balance entradas - salidas (kg)</div><div class="kpi-value">223,533.70</div><div class="kpi-sub">Diferencia E-S del periodo</div></article>
+      <article class="card"><div class="kpi-title">Stock sin procesar fin de periodo (kg)</div><div class="kpi-value">-210,276.75</div><div class="kpi-sub">Arrastre acumulado de Entradas - Cajas</div></article>
+      <article class="card"><div class="kpi-title">BC lotes enlazados</div><div class="kpi-value">0 / 0</div><div class="kpi-sub">- · number = Lot No.</div></article>
+      <article class="card"><div class="kpi-title">Kg Innova enlazado</div><div class="kpi-value">0.00</div><div class="kpi-sub">Salidas Innova con lote en BC</div></article>
+      <article class="card"><div class="kpi-title">BC Kilos enlazados (ILE)</div><div class="kpi-value">0.00</div><div class="kpi-sub">Campo [Kilos] · dif.: 0.00 kg</div></article>
+      <article class="card"><div class="kpi-title">BC con pedido</div><div class="kpi-value">0.00 ud.</div><div class="kpi-sub">0.00 kg · sin pedido: 0.00 ud.</div></article>
+      
+    </section>
+
+    <section class="trace-box">
+      <h3 class="trace-head">Trazabilidad SQL</h3>
+      <p class="trace-meta">Origen: <strong>legacy</strong></p>
+      <p class="trace-meta">Tablas/Vistas: <strong>dbo.vw_stolt, dbo.proc_packs, dbo.proc_matxacts, dbo.proc_materials</strong></p>
+      <p class="trace-meta">Parametros: <strong>start=2026-05-01</strong>, <strong>end=2026-05-31</strong></p>
+      <details class='trace-query'><summary>entrada_legacy</summary><pre>SELECT
+        CAST(p.regtime AS date) AS fecha,
+        SUM(CAST(p.weight AS float)) AS kg_entrada_tina,
+        COUNT(*) AS packs_entrada
+      FROM dbo.proc_packs p
+      JOIN dbo.proc_materials m ON m.material = p.material
+      WHERE p.regtime &gt;= %s
+        AND p.regtime &lt; DATEADD(day, 1, %s)
+        AND m.pkpackaging = 3
+      GROUP BY CAST(p.regtime AS date)
+      ORDER BY fecha;</pre></details>
+<details class='trace-query'><summary>salida_legacy</summary><pre>SELECT
+        CAST(p.regtime AS date) AS fecha,
+        SUM(CAST(p.weight AS float)) AS kg_salida_no_tina,
+        COUNT(*) AS packs_salida
+      FROM dbo.proc_packs p
+      JOIN dbo.proc_materials m ON m.material = p.material
+      WHERE p.regtime &gt;= %s
+        AND p.regtime &lt; DATEADD(day, 1, %s)
+        AND (m.pkpackaging &lt;&gt; 3 OR m.pkpackaging IS NULL)
+      GROUP BY CAST(p.regtime AS date)
+      ORDER BY fecha;</pre></details>
+<details class='trace-query'><summary>consumo_legacy</summary><pre>SELECT
+        CAST(x.regtime AS date) AS fecha,
+        SUM(CAST(x.weight AS float)) AS kg_consumo_tina,
+        COUNT(*) AS movs_consumo
+      FROM dbo.proc_matxacts x
+      JOIN dbo.proc_materials m ON m.material = x.material
+      WHERE x.regtime &gt;= %s
+        AND x.regtime &lt; DATEADD(day, 1, %s)
+        AND x.xactpath = 1
+        AND LOWER(m.name) LIKE &#x27;%tina%&#x27;
+      GROUP BY CAST(x.regtime AS date)
+      ORDER BY fecha;</pre></details>
+<details class='trace-query'><summary>top_entrada_legacy</summary><pre>SELECT TOP 15
+        m.material,
+        m.name AS material_nombre,
+        SUM(CAST(p.weight AS float)) AS kg
+      FROM dbo.proc_packs p
+      JOIN dbo.proc_materials m ON m.material = p.material
+      WHERE p.regtime &gt;= %s
+        AND p.regtime &lt; DATEADD(day, 1, %s)
+        AND m.pkpackaging = 3
+      GROUP BY m.material, m.name
+      ORDER BY kg DESC;</pre></details>
+<details class='trace-query'><summary>top_salida_legacy</summary><pre>SELECT TOP 15
+        m.material,
+        m.name AS material_nombre,
+        SUM(CAST(p.weight AS float)) AS kg
+      FROM dbo.proc_packs p
+      JOIN dbo.proc_materials m ON m.material = p.material
+      WHERE p.regtime &gt;= %s
+        AND p.regtime &lt; DATEADD(day, 1, %s)
+        AND (m.pkpackaging &lt;&gt; 3 OR m.pkpackaging IS NULL)
+      GROUP BY m.material, m.name
+      ORDER BY kg DESC;</pre></details>
+<details class='trace-query'><summary>stock_merma_proc_packs</summary><pre>SELECT
+      CAST(p.regtime AS date) AS fecha,
+      SUM(
+        CASE
+          WHEN m.pkpackaging = 3 AND (p.rtype &lt;&gt; 12 OR p.rtype IS NULL)
+          THEN CAST(p.weight AS float)
+          ELSE 0.0
+        END
+      ) AS kg_stock,
+      SUM(
+        CASE
+          WHEN m.pkpackaging = 3 AND p.rtype = 12
+          THEN CAST(p.weight AS float)
+          ELSE 0.0
+        END
+      ) AS kg_merma
+    FROM dbo.proc_packs p
+    JOIN dbo.proc_materials m ON m.material = p.material
+    WHERE p.regtime &gt;= %s
+      AND p.regtime &lt; DATEADD(day, 1, %s)
+      AND m.pkpackaging = 3
+    GROUP BY CAST(p.regtime AS date)
+    ORDER BY fecha;</pre></details>
+<details class='trace-query'><summary>stock_arrastre_despesque</summary><pre>SELECT
+        CAST(v.fdespesque AS date) AS fecha,
+        SUM(
+          CASE
+            WHEN m.pkpackaging = 3
+            THEN CAST(v.peso AS float)
+            ELSE 0.0
+          END
+        ) AS kg_entrada_tina_stock,
+        SUM(
+          CASE
+            WHEN (m.pkpackaging &lt;&gt; 3 OR m.pkpackaging IS NULL)
+            THEN CAST(v.peso AS float)
+            ELSE 0.0
+          END
+        ) AS kg_cajas_stock
+      FROM dbo.vw_stolt v
+      JOIN dbo.proc_materials m ON m.material = v.material
+      WHERE v.fdespesque &gt;= %s
+        AND v.fdespesque &lt; DATEADD(day, 1, %s)
+      GROUP BY CAST(v.fdespesque AS date)
+      ORDER BY fecha;</pre></details>
+    </section>
+
+    <section class="charts">
+      <article class="chart-card chart-panel">
+        <h3>Evolucion diaria de biomasa (kg)</h3>
+        <button type="button" class="btn-max" data-chart="lineKg">Maximizar</button>
+        <canvas id="lineKg"></canvas>
+      </article>
+      <article class="chart-card chart-panel">
+        <h3>Diferencia diaria y acumulada</h3>
+        <button type="button" class="btn-max" data-chart="comboDiff">Maximizar</button>
+        <canvas id="comboDiff"></canvas>
+      </article>
+      <article class="chart-card chart-panel">
+        <h3>Composicion total del periodo (kg)</h3>
+        <button type="button" class="btn-max" data-chart="donutTotals">Maximizar</button>
+        <canvas id="donutTotals"></canvas>
+      </article>
+      <article class="chart-card chart-panel">
+        <h3>Stock y merma diarios en entradas (kg)</h3>
+        <button type="button" class="btn-max" data-chart="lineStockMerma">Maximizar</button>
+        <canvas id="lineStockMerma"></canvas>
+      </article>
+      <article class="chart-card chart-panel">
+        <h3>Diferencia entre entradas y salidas (kg)</h3>
+        <button type="button" class="btn-max" data-chart="barBalance">Maximizar</button>
+        <canvas id="barBalance"></canvas>
+      </article>
+    </section>
+
+    <section class="tables">
+      <article class="chart-card">
+        <div class="section-head">
+          <h3>Detalle diario de produccion</h3>
+          <button type="button" class="btn-export" data-table-id="detalleTable" data-file-name="detalle_biomasa">
+            <span class="excel-icon">X</span>
+            Exportar Excel
+          </button>
+        </div>
+        <table id="detalleTable">
+          <thead>
+            <tr>
+              <th>Fecha</th>
+              <th class="num">Entradas de biomasa</th>
+              <th class="num">Cajas (kg)</th>
+              <th class="num">Diferencia</th>
+              <th class="num">% Diferencia</th>
+              <th class="num">Salidas totales kg</th>
+              <th class="num">Balance E-S</th>
+              <th class="num">Acum. Diferencia</th>
+              <th class="num">Stock sin procesar</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>01/05/2026</td><td class='num'>26,396.92</td><td class='num'>12,733.00</td><td class='num'>13,663.92</td><td class='num'>51.76%</td><td class='num'>16,049.82</td><td class='num'>10,347.09</td><td class='num'>13,663.92</td><td class='num'>0.00</td></tr>
+<tr><td>02/05/2026</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>-</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>13,663.92</td><td class='num'>-6,681.07</td></tr>
+<tr><td>03/05/2026</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>-</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>13,663.92</td><td class='num'>-6,681.07</td></tr>
+<tr><td>04/05/2026</td><td class='num'>28,296.61</td><td class='num'>14,357.00</td><td class='num'>13,939.61</td><td class='num'>49.26%</td><td class='num'>16,810.76</td><td class='num'>11,485.85</td><td class='num'>27,603.53</td><td class='num'>-24,076.61</td></tr>
+<tr><td>05/05/2026</td><td class='num'>39,774.11</td><td class='num'>19,569.00</td><td class='num'>20,205.11</td><td class='num'>50.80%</td><td class='num'>20,588.46</td><td class='num'>19,185.65</td><td class='num'>47,808.64</td><td class='num'>-29,682.85</td></tr>
+<tr><td>06/05/2026</td><td class='num'>23,904.70</td><td class='num'>23,759.00</td><td class='num'>145.70</td><td class='num'>0.61%</td><td class='num'>25,390.79</td><td class='num'>-1,486.09</td><td class='num'>47,954.34</td><td class='num'>-31,983.33</td></tr>
+<tr><td>07/05/2026</td><td class='num'>32,380.04</td><td class='num'>25,356.00</td><td class='num'>7,024.04</td><td class='num'>21.69%</td><td class='num'>29,304.13</td><td class='num'>3,075.91</td><td class='num'>54,978.38</td><td class='num'>-39,122.50</td></tr>
+<tr><td>08/05/2026</td><td class='num'>22,893.12</td><td class='num'>20,976.00</td><td class='num'>1,917.12</td><td class='num'>8.37%</td><td class='num'>24,530.91</td><td class='num'>-1,637.79</td><td class='num'>56,895.50</td><td class='num'>-44,421.24</td></tr>
+<tr><td>09/05/2026</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>-</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>56,895.50</td><td class='num'>-44,421.24</td></tr>
+<tr><td>10/05/2026</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>-</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>56,895.50</td><td class='num'>-44,295.87</td></tr>
+<tr><td>11/05/2026</td><td class='num'>30,101.45</td><td class='num'>10,396.00</td><td class='num'>19,705.45</td><td class='num'>65.46%</td><td class='num'>14,150.44</td><td class='num'>15,951.01</td><td class='num'>76,600.94</td><td class='num'>-59,586.82</td></tr>
+<tr><td>12/05/2026</td><td class='num'>28,392.49</td><td class='num'>16,965.00</td><td class='num'>11,427.49</td><td class='num'>40.25%</td><td class='num'>21,747.57</td><td class='num'>6,644.92</td><td class='num'>88,028.43</td><td class='num'>-73,022.20</td></tr>
+<tr><td>13/05/2026</td><td class='num'>37,126.38</td><td class='num'>17,235.00</td><td class='num'>19,891.38</td><td class='num'>53.58%</td><td class='num'>20,628.86</td><td class='num'>16,497.52</td><td class='num'>107,919.82</td><td class='num'>-78,023.01</td></tr>
+<tr><td>14/05/2026</td><td class='num'>34,250.84</td><td class='num'>17,025.00</td><td class='num'>17,225.84</td><td class='num'>50.29%</td><td class='num'>19,752.33</td><td class='num'>14,498.51</td><td class='num'>125,145.66</td><td class='num'>-87,872.83</td></tr>
+<tr><td>15/05/2026</td><td class='num'>14,791.83</td><td class='num'>21,266.00</td><td class='num'>-6,474.17</td><td class='num'>-43.77%</td><td class='num'>25,297.07</td><td class='num'>-10,505.24</td><td class='num'>118,671.49</td><td class='num'>-86,732.67</td></tr>
+<tr><td>16/05/2026</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>-</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>118,671.49</td><td class='num'>-86,732.67</td></tr>
+<tr><td>17/05/2026</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>-</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>118,671.49</td><td class='num'>-86,732.67</td></tr>
+<tr><td>18/05/2026</td><td class='num'>13,487.49</td><td class='num'>13,140.00</td><td class='num'>347.49</td><td class='num'>2.58%</td><td class='num'>16,627.64</td><td class='num'>-3,140.16</td><td class='num'>119,018.98</td><td class='num'>-87,188.50</td></tr>
+<tr><td>19/05/2026</td><td class='num'>47,527.74</td><td class='num'>6,451.00</td><td class='num'>41,076.74</td><td class='num'>86.43%</td><td class='num'>9,526.88</td><td class='num'>38,000.85</td><td class='num'>160,095.71</td><td class='num'>-94,106.14</td></tr>
+<tr><td>20/05/2026</td><td class='num'>36,957.77</td><td class='num'>19,553.00</td><td class='num'>17,404.77</td><td class='num'>47.09%</td><td class='num'>22,677.33</td><td class='num'>14,280.43</td><td class='num'>177,500.48</td><td class='num'>-97,509.60</td></tr>
+<tr><td>21/05/2026</td><td class='num'>30,781.48</td><td class='num'>28,376.00</td><td class='num'>2,405.48</td><td class='num'>7.81%</td><td class='num'>32,343.03</td><td class='num'>-1,561.55</td><td class='num'>179,905.96</td><td class='num'>-110,271.02</td></tr>
+<tr><td>22/05/2026</td><td class='num'>26,372.61</td><td class='num'>17,080.00</td><td class='num'>9,292.61</td><td class='num'>35.24%</td><td class='num'>21,641.46</td><td class='num'>4,731.15</td><td class='num'>189,198.58</td><td class='num'>-120,448.88</td></tr>
+<tr><td>23/05/2026</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>-</td><td class='num'>1.77</td><td class='num'>-1.77</td><td class='num'>189,198.58</td><td class='num'>-120,448.88</td></tr>
+<tr><td>24/05/2026</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>-</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>189,198.58</td><td class='num'>-120,448.88</td></tr>
+<tr><td>25/05/2026</td><td class='num'>31,892.56</td><td class='num'>16,952.00</td><td class='num'>14,940.56</td><td class='num'>46.85%</td><td class='num'>21,040.82</td><td class='num'>10,851.74</td><td class='num'>204,139.13</td><td class='num'>-148,098.00</td></tr>
+<tr><td>26/05/2026</td><td class='num'>56,139.85</td><td class='num'>21,062.00</td><td class='num'>35,077.85</td><td class='num'>62.48%</td><td class='num'>17,978.40</td><td class='num'>38,161.46</td><td class='num'>239,216.99</td><td class='num'>-175,857.83</td></tr>
+<tr><td>27/05/2026</td><td class='num'>50,812.44</td><td class='num'>23,173.00</td><td class='num'>27,639.44</td><td class='num'>54.40%</td><td class='num'>26,847.50</td><td class='num'>23,964.94</td><td class='num'>266,856.43</td><td class='num'>-184,641.00</td></tr>
+<tr><td>28/05/2026</td><td class='num'>50,591.95</td><td class='num'>30,541.00</td><td class='num'>20,050.95</td><td class='num'>39.63%</td><td class='num'>33,517.62</td><td class='num'>17,074.32</td><td class='num'>286,907.37</td><td class='num'>-203,331.02</td></tr>
+<tr><td>29/05/2026</td><td class='num'>30,607.95</td><td class='num'>29,102.00</td><td class='num'>1,505.95</td><td class='num'>4.92%</td><td class='num'>33,492.99</td><td class='num'>-2,885.05</td><td class='num'>288,413.32</td><td class='num'>-210,276.75</td></tr>
+<tr><td>30/05/2026</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>-</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>288,413.32</td><td class='num'>-210,276.75</td></tr>
+<tr><td>31/05/2026</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>-</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>288,413.32</td><td class='num'>-210,276.75</td></tr>
+            <tr>
+              <td><strong>TOTAL</strong></td>
+              <td class="num"><strong>693,480.32</strong></td>
+              <td class="num"><strong>405,067.00</strong></td>
+              <td class="num"><strong>288,413.32</strong></td>
+              <td class="num"><strong>41.59%</strong></td>
+              <td class="num"><strong>469,946.62</strong></td>
+              <td class="num"><strong>223,533.70</strong></td>
+              <td class="num"><strong>288,413.32</strong></td>
+              <td class="num"><strong>-210,276.75</strong></td>
+            </tr>
+          </tbody>
+        </table>
+      </article>
+
+      <article class="chart-card">
+        <div class="section-head">
+          <h3>Entradas, salidas, stock y merma</h3>
+          <button type="button" class="btn-export" data-table-id="stockMermaTable" data-file-name="entradas_salidas_stock_merma">
+            <span class="excel-icon">X</span>
+            Exportar Excel
+          </button>
+        </div>
+        <p class="muted" style="margin-top:0;">
+          Stock y merma desglosan las entradas (pkpackaging=3) por proc_packs.rtype:
+          rtype=12 es merma; rtype distinto de 12 es stock. Entradas = Stock + Merma.
+        </p>
+        <table id="stockMermaTable">
+          <thead>
+            <tr>
+              <th>Fecha</th>
+              <th class="num">Entradas (kg)</th>
+              <th class="num">Salidas (kg)</th>
+              <th class="num">Stock (kg)</th>
+              <th class="num">Merma (kg)</th>
+              <th class="num">Diferencia E-S (kg)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>01/05/2026</td><td class='num'>26,396.92</td><td class='num'>16,049.82</td><td class='num'>12,039.92</td><td class='num'>14,357.00</td><td class='num'>10,347.09</td></tr>
+<tr><td>04/05/2026</td><td class='num'>28,296.61</td><td class='num'>16,810.76</td><td class='num'>11,977.61</td><td class='num'>16,319.00</td><td class='num'>11,485.85</td></tr>
+<tr><td>05/05/2026</td><td class='num'>39,774.11</td><td class='num'>20,588.46</td><td class='num'>12,765.11</td><td class='num'>27,009.00</td><td class='num'>19,185.65</td></tr>
+<tr><td>06/05/2026</td><td class='num'>23,904.70</td><td class='num'>25,390.79</td><td class='num'>4,735.70</td><td class='num'>19,169.00</td><td class='num'>-1,486.09</td></tr>
+<tr><td>07/05/2026</td><td class='num'>32,380.04</td><td class='num'>29,304.13</td><td class='num'>9,917.04</td><td class='num'>22,463.00</td><td class='num'>3,075.91</td></tr>
+<tr><td>08/05/2026</td><td class='num'>22,893.12</td><td class='num'>24,530.91</td><td class='num'>7,797.12</td><td class='num'>15,096.00</td><td class='num'>-1,637.79</td></tr>
+<tr><td>11/05/2026</td><td class='num'>30,101.45</td><td class='num'>14,150.44</td><td class='num'>13,136.45</td><td class='num'>16,965.00</td><td class='num'>15,951.01</td></tr>
+<tr><td>12/05/2026</td><td class='num'>28,392.49</td><td class='num'>21,747.57</td><td class='num'>11,157.49</td><td class='num'>17,235.00</td><td class='num'>6,644.92</td></tr>
+<tr><td>13/05/2026</td><td class='num'>37,126.38</td><td class='num'>20,628.86</td><td class='num'>20,101.38</td><td class='num'>17,025.00</td><td class='num'>16,497.52</td></tr>
+<tr><td>14/05/2026</td><td class='num'>34,250.84</td><td class='num'>19,752.33</td><td class='num'>12,984.84</td><td class='num'>21,266.00</td><td class='num'>14,498.51</td></tr>
+<tr><td>15/05/2026</td><td class='num'>14,791.83</td><td class='num'>25,297.07</td><td class='num'>1,651.83</td><td class='num'>13,140.00</td><td class='num'>-10,505.24</td></tr>
+<tr><td>18/05/2026</td><td class='num'>13,487.49</td><td class='num'>16,627.64</td><td class='num'>7,036.49</td><td class='num'>6,451.00</td><td class='num'>-3,140.16</td></tr>
+<tr><td>19/05/2026</td><td class='num'>47,527.74</td><td class='num'>9,526.88</td><td class='num'>29,474.74</td><td class='num'>18,053.00</td><td class='num'>38,000.85</td></tr>
+<tr><td>20/05/2026</td><td class='num'>36,957.77</td><td class='num'>22,677.33</td><td class='num'>14,567.77</td><td class='num'>22,390.00</td><td class='num'>14,280.43</td></tr>
+<tr><td>21/05/2026</td><td class='num'>30,781.48</td><td class='num'>32,343.03</td><td class='num'>6,215.48</td><td class='num'>24,566.00</td><td class='num'>-1,561.55</td></tr>
+<tr><td>22/05/2026</td><td class='num'>26,372.61</td><td class='num'>21,641.46</td><td class='num'>9,420.61</td><td class='num'>16,952.00</td><td class='num'>4,731.15</td></tr>
+<tr><td>23/05/2026</td><td class='num'>0.00</td><td class='num'>1.77</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>-1.77</td></tr>
+<tr><td>25/05/2026</td><td class='num'>31,892.56</td><td class='num'>21,040.82</td><td class='num'>10,830.56</td><td class='num'>21,062.00</td><td class='num'>10,851.74</td></tr>
+<tr><td>26/05/2026</td><td class='num'>56,139.85</td><td class='num'>17,978.40</td><td class='num'>32,966.85</td><td class='num'>23,173.00</td><td class='num'>38,161.46</td></tr>
+<tr><td>27/05/2026</td><td class='num'>50,812.44</td><td class='num'>26,847.50</td><td class='num'>20,271.44</td><td class='num'>30,541.00</td><td class='num'>23,964.94</td></tr>
+<tr><td>28/05/2026</td><td class='num'>50,591.95</td><td class='num'>33,517.62</td><td class='num'>21,489.95</td><td class='num'>29,102.00</td><td class='num'>17,074.32</td></tr>
+<tr><td>29/05/2026</td><td class='num'>30,607.95</td><td class='num'>33,492.99</td><td class='num'>10,298.95</td><td class='num'>20,309.00</td><td class='num'>-2,885.05</td></tr>
+            <tr>
+              <td><strong>TOTAL</strong></td>
+              <td class="num"><strong>693,480.32</strong></td>
+              <td class="num"><strong>469,946.62</strong></td>
+              <td class="num"><strong>280,837.32</strong></td>
+              <td class="num"><strong>412,643.00</strong></td>
+              <td class="num"><strong>223,533.70</strong></td>
+            </tr>
+          </tbody>
+        </table>
+      </article>
+
+      
+      <article class="chart-card">
+        <div class="section-head">
+          <h3>Cruce Innova / Business Central por lote (number / Lot No.)</h3>
+          <button type="button" class="btn-export" data-table-id="bcCruceTable" data-file-name="cruce_bc_salidas_pedido">
+            <span class="excel-icon">X</span>
+            Exportar Excel
+          </button>
+        </div>
+        <p class="muted" style="margin-top:0;">
+          Salidas Innova agrupadas por fecha de regtime. Cada pack de salida enlaza con BC por
+          <strong>proc_packs.number</strong> = <strong>[Lot No.]</strong> (codigo de lote/caja).
+          Con pedido = [Order No.] informado en el albaran; sin pedido = vacio.
+          Unidades BC = Quantity; kilos BC = [Kilos] en Item Ledger Entry (valor absoluto).
+          BC no disponible (--skip-bc o error de conexion). Valores a cero.
+        </p>
+        <table id="bcCruceTable">
+          <thead>
+            <tr>
+              <th>Fecha</th>
+              <th class="num">Salidas Innova (kg)</th>
+              <th class="num">Lotes Innova</th>
+              <th class="num">Lotes enlazados BC</th>
+              <th class="num">Kg Innova enlazado</th>
+              <th class="num">BC Kilos enlazados</th>
+              <th class="num">Dif. kg (I-BC)</th>
+              <th class="num">BC con pedido (ud.)</th>
+              <th class="num">BC sin pedido (ud.)</th>
+              <th class="num">BC con pedido (kg)</th>
+              <th class="num">BC sin pedido (kg)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>01/05/2026</td><td class='num'>16,049.82</td><td class='num'>0</td><td class='num'>0</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td></tr>
+<tr><td>04/05/2026</td><td class='num'>16,810.76</td><td class='num'>0</td><td class='num'>0</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td></tr>
+<tr><td>05/05/2026</td><td class='num'>20,588.46</td><td class='num'>0</td><td class='num'>0</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td></tr>
+<tr><td>06/05/2026</td><td class='num'>25,390.79</td><td class='num'>0</td><td class='num'>0</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td></tr>
+<tr><td>07/05/2026</td><td class='num'>29,304.13</td><td class='num'>0</td><td class='num'>0</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td></tr>
+<tr><td>08/05/2026</td><td class='num'>24,530.91</td><td class='num'>0</td><td class='num'>0</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td></tr>
+<tr><td>11/05/2026</td><td class='num'>14,150.44</td><td class='num'>0</td><td class='num'>0</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td></tr>
+<tr><td>12/05/2026</td><td class='num'>21,747.57</td><td class='num'>0</td><td class='num'>0</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td></tr>
+<tr><td>13/05/2026</td><td class='num'>20,628.86</td><td class='num'>0</td><td class='num'>0</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td></tr>
+<tr><td>14/05/2026</td><td class='num'>19,752.33</td><td class='num'>0</td><td class='num'>0</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td></tr>
+<tr><td>15/05/2026</td><td class='num'>25,297.07</td><td class='num'>0</td><td class='num'>0</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td></tr>
+<tr><td>18/05/2026</td><td class='num'>16,627.64</td><td class='num'>0</td><td class='num'>0</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td></tr>
+<tr><td>19/05/2026</td><td class='num'>9,526.88</td><td class='num'>0</td><td class='num'>0</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td></tr>
+<tr><td>20/05/2026</td><td class='num'>22,677.33</td><td class='num'>0</td><td class='num'>0</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td></tr>
+<tr><td>21/05/2026</td><td class='num'>32,343.03</td><td class='num'>0</td><td class='num'>0</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td></tr>
+<tr><td>22/05/2026</td><td class='num'>21,641.46</td><td class='num'>0</td><td class='num'>0</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td></tr>
+<tr><td>23/05/2026</td><td class='num'>1.77</td><td class='num'>0</td><td class='num'>0</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td></tr>
+<tr><td>25/05/2026</td><td class='num'>21,040.82</td><td class='num'>0</td><td class='num'>0</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td></tr>
+<tr><td>26/05/2026</td><td class='num'>17,978.40</td><td class='num'>0</td><td class='num'>0</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td></tr>
+<tr><td>27/05/2026</td><td class='num'>26,847.50</td><td class='num'>0</td><td class='num'>0</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td></tr>
+<tr><td>28/05/2026</td><td class='num'>33,517.62</td><td class='num'>0</td><td class='num'>0</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td></tr>
+<tr><td>29/05/2026</td><td class='num'>33,492.99</td><td class='num'>0</td><td class='num'>0</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>0.00</td></tr>
+            <tr>
+              <td><strong>TOTAL</strong></td>
+              <td class="num"><strong>469,946.62</strong></td>
+              <td class="num"><strong>0</strong></td>
+              <td class="num"><strong>0</strong></td>
+              <td class="num"><strong>0.00</strong></td>
+              <td class="num"><strong>0.00</strong></td>
+              <td class="num"><strong>0.00</strong></td>
+              <td class="num"><strong>0.00</strong></td>
+              <td class="num"><strong>0.00</strong></td>
+              <td class="num"><strong>0.00</strong></td>
+              <td class="num"><strong>0.00</strong></td>
+            </tr>
+          </tbody>
+        </table>
+      </article>
+
+
+      <article class="chart-card">
+        <div class="section-head">
+          <h3>Top materiales de entrada</h3>
+          <button type="button" class="btn-export" data-table-id="topEntradasTable" data-file-name="top_materiales_entrada_tina_e">
+            <span class="excel-icon">X</span>
+            Exportar Excel
+          </button>
+        </div>
+        <table id="topEntradasTable">
+          <thead><tr><th>#</th><th>ID</th><th>Material</th><th class="num">kg</th></tr></thead>
+          <tbody><tr><td>1</td><td>29</td><td>TINA 1.0-1.5</td><td class='num'>84,215.00</td></tr>
+<tr><td>2</td><td>30</td><td>TINA 2.0-2.5</td><td class='num'>77,648.00</td></tr>
+<tr><td>3</td><td>205</td><td>TINA 1.5-2.0</td><td class='num'>75,126.00</td></tr>
+<tr><td>4</td><td>32</td><td>TINA 3.0-4.0</td><td class='num'>50,170.00</td></tr>
+<tr><td>5</td><td>530</td><td>1.5-2.0 Entero tinas para cong</td><td class='num'>49,495.00</td></tr>
+<tr><td>6</td><td>111</td><td>Filete 1.5-2.0 E</td><td class='num'>40,592.94</td></tr>
+<tr><td>7</td><td>22</td><td>TINA LG 0.6-0.8</td><td class='num'>34,749.00</td></tr>
+<tr><td>8</td><td>529</td><td>1.0-1.5 Entero tinas para cong</td><td class='num'>33,838.94</td></tr>
+<tr><td>9</td><td>24</td><td>TINA LG 0.8-1.0</td><td class='num'>23,290.00</td></tr>
+<tr><td>10</td><td>425</td><td>Filete 1.5-2.0 E. Externo</td><td class='num'>21,853.98</td></tr>
+<tr><td>11</td><td>20</td><td>TINA LG 0.5-0.6</td><td class='num'>19,493.00</td></tr>
+<tr><td>12</td><td>28</td><td>TINA 0.8-1.0</td><td class='num'>19,204.00</td></tr>
+<tr><td>13</td><td>266</td><td>Porciones 2.0-2.5 E</td><td class='num'>17,374.68</td></tr>
+<tr><td>14</td><td>109</td><td>Filete 1.0-1.5 E</td><td class='num'>14,565.01</td></tr>
+<tr><td>15</td><td>424</td><td>Filete 1.0-1.5 E. Externo</td><td class='num'>13,798.75</td></tr></tbody>
+        </table>
+        <div class="section-head" style="margin-top:18px;">
+          <h3>Top materiales de salida (resto)</h3>
+          <button type="button" class="btn-export" data-table-id="topSalidasTable" data-file-name="top_materiales_salida_no_tina">
+            <span class="excel-icon">X</span>
+            Exportar Excel
+          </button>
+        </div>
+        <table id="topSalidasTable">
+          <thead><tr><th>#</th><th>ID</th><th>Material</th><th class="num">kg</th></tr></thead>
+          <tbody><tr><td>1</td><td>62</td><td>1.5-2.0 p</td><td class='num'>50,766.89</td></tr>
+<tr><td>2</td><td>57</td><td>1.0-1.5 p</td><td class='num'>37,057.51</td></tr>
+<tr><td>3</td><td>68</td><td>2.0-2.5 P</td><td class='num'>27,459.60</td></tr>
+<tr><td>4</td><td>67</td><td>2.0-2.5</td><td class='num'>26,445.78</td></tr>
+<tr><td>5</td><td>73</td><td>3.0-4.0</td><td class='num'>21,865.52</td></tr>
+<tr><td>6</td><td>56</td><td>1.0-1.5 Q</td><td class='num'>17,723.84</td></tr>
+<tr><td>7</td><td>216</td><td>Lenguado 0.6-0.8 Q</td><td class='num'>16,756.93</td></tr>
+<tr><td>8</td><td>61</td><td>1.5-2.0 Q</td><td class='num'>15,387.08</td></tr>
+<tr><td>9</td><td>204</td><td>Lenguado 0.5-0.6 Q</td><td class='num'>14,216.73</td></tr>
+<tr><td>10</td><td>75</td><td>3.0-4.0 P</td><td class='num'>14,126.56</td></tr>
+<tr><td>11</td><td>53</td><td>1.0-1.5</td><td class='num'>13,219.18</td></tr>
+<tr><td>12</td><td>50</td><td>0.8-1 p</td><td class='num'>12,978.04</td></tr>
+<tr><td>13</td><td>45</td><td>0.6-0.8 p</td><td class='num'>10,831.43</td></tr>
+<tr><td>14</td><td>402</td><td>Lenguado 0.6-0.8 AVION</td><td class='num'>10,709.92</td></tr>
+<tr><td>15</td><td>58</td><td>1.5-2.0</td><td class='num'>10,427.36</td></tr></tbody>
+        </table>
+      </article>
+    </section>
+
+    <div id="chartModal" class="chart-modal" aria-hidden="true">
+      <div class="chart-modal-content" role="dialog" aria-modal="true" aria-labelledby="chartModalTitle">
+        <div class="chart-modal-head">
+          <h3 id="chartModalTitle">Grafica ampliada</h3>
+          <button id="chartModalClose" type="button" class="chart-modal-close">Cerrar</button>
+        </div>
+        <div class="chart-modal-body">
+          <canvas id="chartModalCanvas"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+const labels = ["01/05/2026", "02/05/2026", "03/05/2026", "04/05/2026", "05/05/2026", "06/05/2026", "07/05/2026", "08/05/2026", "09/05/2026", "10/05/2026", "11/05/2026", "12/05/2026", "13/05/2026", "14/05/2026", "15/05/2026", "16/05/2026", "17/05/2026", "18/05/2026", "19/05/2026", "20/05/2026", "21/05/2026", "22/05/2026", "23/05/2026", "24/05/2026", "25/05/2026", "26/05/2026", "27/05/2026", "28/05/2026", "29/05/2026", "30/05/2026", "31/05/2026"];
+const entrada = [26396.92, 0.0, 0.0, 28296.61, 39774.11, 23904.7, 32380.04, 22893.12, 0.0, 0.0, 30101.45, 28392.49, 37126.38, 34250.84, 14791.83, 0.0, 0.0, 13487.49, 47527.74, 36957.77, 30781.48, 26372.61, 0.0, 0.0, 31892.56, 56139.85, 50812.44, 50591.95, 30607.95, 0.0, 0.0];
+const consumo = [12733.0, 0.0, 0.0, 14357.0, 19569.0, 23759.0, 25356.0, 20976.0, 0.0, 0.0, 10396.0, 16965.0, 17235.0, 17025.0, 21266.0, 0.0, 0.0, 13140.0, 6451.0, 19553.0, 28376.0, 17080.0, 0.0, 0.0, 16952.0, 21062.0, 23173.0, 30541.0, 29102.0, 0.0, 0.0];
+const salida = [16049.82, 0.0, 0.0, 16810.76, 20588.46, 25390.79, 29304.13, 24530.91, 0.0, 0.0, 14150.44, 21747.57, 20628.86, 19752.33, 25297.07, 0.0, 0.0, 16627.64, 9526.88, 22677.33, 32343.03, 21641.46, 1.77, 0.0, 21040.82, 17978.4, 26847.5, 33517.62, 33492.99, 0.0, 0.0];
+const diferencia = [13663.92, 0.0, 0.0, 13939.61, 20205.11, 145.7, 7024.04, 1917.12, 0.0, 0.0, 19705.45, 11427.49, 19891.38, 17225.84, -6474.17, 0.0, 0.0, 347.49, 41076.74, 17404.77, 2405.48, 9292.61, 0.0, 0.0, 14940.56, 35077.85, 27639.44, 20050.95, 1505.95, 0.0, 0.0];
+const acumulado = [13663.92, 13663.92, 13663.92, 27603.53, 47808.64, 47954.34, 54978.38, 56895.5, 56895.5, 56895.5, 76600.94, 88028.43, 107919.82, 125145.66, 118671.49, 118671.49, 118671.49, 119018.98, 160095.71, 177500.48, 179905.96, 189198.58, 189198.58, 189198.58, 204139.13, 239216.99, 266856.43, 286907.37, 288413.32, 288413.32, 288413.32];
+const stockEntrada = [12039.92, 0.0, 0.0, 11977.61, 12765.11, 4735.7, 9917.04, 7797.12, 0.0, 0.0, 13136.45, 11157.49, 20101.38, 12984.84, 1651.83, 0.0, 0.0, 7036.49, 29474.74, 14567.77, 6215.48, 9420.61, 0.0, 0.0, 10830.56, 32966.85, 20271.44, 21489.95, 10298.95, 0.0, 0.0];
+const merma = [14357.0, 0.0, 0.0, 16319.0, 27009.0, 19169.0, 22463.0, 15096.0, 0.0, 0.0, 16965.0, 17235.0, 17025.0, 21266.0, 13140.0, 0.0, 0.0, 6451.0, 18053.0, 22390.0, 24566.0, 16952.0, 0.0, 0.0, 21062.0, 23173.0, 30541.0, 29102.0, 20309.0, 0.0, 0.0];
+const balance = entrada.map((v, i) => Number((v - salida[i]).toFixed(2)));
+
+const chartConfigs = {
+  lineKg: {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Entradas de biomasa', data: entrada, borderColor: '#0b6e4f', tension: 0.25, fill: false },
+        { label: 'Cajas (kg)', data: consumo, borderColor: '#dc2626', tension: 0.25, fill: false },
+        { label: 'Salidas totales kg', data: salida, borderColor: '#2563eb', tension: 0.25, fill: false }
+      ]
+    },
+    options: { responsive: true, maintainAspectRatio: false }
+  },
+  comboDiff: {
+    data: {
+      labels,
+      datasets: [
+        { type: 'bar', label: 'Diferencia diaria', data: diferencia, backgroundColor: diferencia.map(v => v >= 0 ? 'rgba(11,110,79,.7)' : 'rgba(180,35,24,.7)') },
+        { type: 'line', label: 'Acumulado diferencia', data: acumulado, borderColor: '#7c3aed', tension: 0.2, yAxisID: 'y1' }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        y: { position: 'left' },
+        y1: { position: 'right', grid: { drawOnChartArea: false } }
+      }
+    }
+  },
+  donutTotals: {
+    type: 'doughnut',
+    data: {
+      labels: ['Stock en entradas', 'Merma', 'Salidas', 'Cajas (kg)'],
+      datasets: [{
+        data: [
+          280837.32,
+          412643.00,
+          469946.62,
+          405067.00
+        ],
+        backgroundColor: ['#0b6e4f', '#f59e0b', '#2563eb', '#dc2626']
+      }]
+    },
+    options: { responsive: true, maintainAspectRatio: false }
+  },
+  lineStockMerma: {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Stock en entradas', data: stockEntrada, borderColor: '#0b6e4f', tension: 0.25, fill: false },
+        { label: 'Merma', data: merma, borderColor: '#f59e0b', tension: 0.25, fill: false }
+      ]
+    },
+    options: { responsive: true, maintainAspectRatio: false }
+  },
+  barBalance: {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Diferencia entre entradas y salidas',
+        data: balance,
+        backgroundColor: balance.map(v => v >= 0 ? 'rgba(37,99,235,.75)' : 'rgba(245,158,11,.75)')
+      }]
+    },
+    options: { responsive: true, maintainAspectRatio: false }
+  }
+};
+
+for (const [chartId, chartConfig] of Object.entries(chartConfigs)) {
+  new Chart(document.getElementById(chartId), chartConfig);
+}
+
+const chartModal = document.getElementById('chartModal');
+const chartModalClose = document.getElementById('chartModalClose');
+const chartModalTitle = document.getElementById('chartModalTitle');
+const chartModalCanvas = document.getElementById('chartModalCanvas');
+let chartModalInstance = null;
+
+function openChartModal(chartId, title) {
+  if (!(chartId in chartConfigs)) return;
+  chartModalTitle.textContent = title || 'Grafica ampliada';
+  chartModal.classList.add('is-open');
+  chartModal.setAttribute('aria-hidden', 'false');
+
+  if (chartModalInstance) {
+    chartModalInstance.destroy();
+  }
+
+  const modalConfig = JSON.parse(JSON.stringify(chartConfigs[chartId]));
+  chartModalInstance = new Chart(chartModalCanvas, modalConfig);
+}
+
+function closeChartModal() {
+  chartModal.classList.remove('is-open');
+  chartModal.setAttribute('aria-hidden', 'true');
+  if (chartModalInstance) {
+    chartModalInstance.destroy();
+    chartModalInstance = null;
+  }
+}
+
+document.querySelectorAll('.btn-max').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const chartId = btn.getAttribute('data-chart');
+    const title = btn.closest('.chart-card')?.querySelector('h3')?.textContent?.trim();
+    openChartModal(chartId, title);
+  });
+});
+
+chartModalClose.addEventListener('click', closeChartModal);
+chartModal.addEventListener('click', (event) => {
+  if (event.target === chartModal) {
+    closeChartModal();
+  }
+});
+
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && chartModal.classList.contains('is-open')) {
+    closeChartModal();
+  }
+});
+
+function exportTableToExcel(tableId, fileName) {
+  const table = document.getElementById(tableId);
+  if (!table) return;
+
+  const workbook = [
+    '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">',
+    '<head><meta charset="UTF-8"></head>',
+    '<body>',
+    table.outerHTML,
+    '</body>',
+    '</html>'
+  ].join('');
+
+  const blob = new Blob(['﻿' + workbook], { type: 'application/vnd.ms-excel' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `${fileName || 'tabla'}.xls`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function exportAllTablesToExcel(fileName) {
+  const sections = [
+    { sheetName: 'Detalle diario', tableId: 'detalleTable' },
+    { sheetName: 'Stock y merma', tableId: 'stockMermaTable' },
+    { sheetName: 'Cruce BC', tableId: 'bcCruceTable' },
+    { sheetName: 'Top entrada', tableId: 'topEntradasTable' },
+    { sheetName: 'Top salida', tableId: 'topSalidasTable' }
+  ];
+
+  if (typeof XLSX === 'undefined') {
+    alert('No se pudo cargar la libreria de Excel. Revisa conexion a internet.');
+    return;
+  }
+
+  const workbook = XLSX.utils.book_new();
+
+  for (const section of sections) {
+    const table = document.getElementById(section.tableId);
+    if (!table) continue;
+    const worksheet = XLSX.utils.table_to_sheet(table, { raw: true });
+    XLSX.utils.book_append_sheet(workbook, worksheet, section.sheetName);
+  }
+
+  XLSX.writeFile(workbook, `${fileName || 'reporte_biomasa_completo'}.xlsx`);
+}
+
+document.querySelectorAll('.btn-export').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const tableId = btn.getAttribute('data-table-id');
+    const fileName = btn.getAttribute('data-file-name');
+    if (tableId) {
+      exportTableToExcel(tableId, fileName);
+    }
+  });
+});
+
+const btnExportAll = document.getElementById('btnExportAll');
+if (btnExportAll) {
+  btnExportAll.addEventListener('click', () => {
+    const fileName = btnExportAll.getAttribute('data-file-name');
+    exportAllTablesToExcel(fileName);
+  });
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+timestamp=2026-05-25T14:39:21.504352
+error_type=ValueError
+error_message=Fecha invalida: 01. Use formato dd/mm/aaaa
+
+--- traceback ---
+Traceback (most recent call last):
+  File "C:\Users\JZN\OneDrive - Stolt-Nielsen Limited\GITHUB\CALCULO_BIOMASA\generar_reporte_biomasa.py", line 1114, in <module>
+    main()
+    ~~~~^^
+  File "C:\Users\JZN\OneDrive - Stolt-Nielsen Limited\GITHUB\CALCULO_BIOMASA\generar_reporte_biomasa.py", line 1078, in main
+    start, end = resolve_dates(args)
+                 ~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\JZN\OneDrive - Stolt-Nielsen Limited\GITHUB\CALCULO_BIOMASA\generar_reporte_biomasa.py", line 135, in resolve_dates
+    start = parse_user_date(start_raw)
+  File "C:\Users\JZN\OneDrive - Stolt-Nielsen Limited\GITHUB\CALCULO_BIOMASA\generar_reporte_biomasa.py", line 125, in parse_user_date
+    raise ValueError(f"Fecha invalida: {value}. Use formato dd/mm/aaaa")
+ValueError: Fecha invalida: 01. Use formato dd/mm/aaaa

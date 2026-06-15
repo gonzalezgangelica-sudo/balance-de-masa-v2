@@ -1,0 +1,13 @@
+timestamp=2026-05-25T14:40:26.812321
+error_type=TypeError
+error_message=cannot unpack non-iterable NoneType object
+
+--- traceback ---
+Traceback (most recent call last):
+  File "C:\Users\JZN\OneDrive - Stolt-Nielsen Limited\GITHUB\CALCULO_BIOMASA\generar_reporte_biomasa.py", line 1121, in <module>
+    main()
+    ~~~~^^
+  File "C:\Users\JZN\OneDrive - Stolt-Nielsen Limited\GITHUB\CALCULO_BIOMASA\generar_reporte_biomasa.py", line 1085, in main
+    start, end = resolve_dates(args)
+    ^^^^^^^^^^
+TypeError: cannot unpack non-iterable NoneType object
