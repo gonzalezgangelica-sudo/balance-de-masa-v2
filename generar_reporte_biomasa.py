@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import calendar
 import datetime as dt
 import html
 import json
@@ -116,9 +117,24 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
       "--stock-inicial",
-      type=float,
       default=None,
-      help="Stock inicial del periodo (kg) para validar stock teorico.",
+      help="Stock inicial del periodo (kg) o 'auto' (equivale a --arrastre-mensual).",
+    )
+    parser.add_argument(
+      "--arrastre-mensual",
+      action="store_true",
+      help="Calcula stock inicial encadenando cierre mensual del mes anterior.",
+    )
+    parser.add_argument(
+      "--stock-ancla",
+      default=None,
+      help="Mes ancla para arrastre (dd/mm/aaaa, dia 1). Default: 01/01 del ano del periodo.",
+    )
+    parser.add_argument(
+      "--stock-ancla-kg",
+      type=float,
+      default=0.0,
+      help="Stock de apertura (kg) en el mes ancla (default 0).",
     )
     parser.add_argument(
       "--stock-final-fisico",
@@ -176,6 +192,192 @@ def parse_user_date(value: str) -> dt.date:
         except ValueError:
             continue
     raise ValueError(f"Fecha invalida: {value}. Use formato dd/mm/aaaa")
+
+
+def parse_stock_inicial_arg(value: str | None) -> tuple[float | None, bool]:
+    if value is None:
+        return None, False
+    if str(value).strip().lower() == "auto":
+        return None, True
+    try:
+        return float(value), False
+    except ValueError as exc:
+        raise ValueError(
+            f"--stock-inicial invalido: {value}. Use un numero o 'auto'."
+        ) from exc
+
+
+def first_day_of_month(value: dt.date) -> dt.date:
+    return value.replace(day=1)
+
+
+def last_day_of_month(value: dt.date) -> dt.date:
+    return value.replace(day=calendar.monthrange(value.year, value.month)[1])
+
+
+def add_months(value: dt.date, months: int) -> dt.date:
+    month_index = value.month - 1 + months
+    year = value.year + month_index // 12
+    month = month_index % 12 + 1
+    day = min(value.day, calendar.monthrange(year, month)[1])
+    return dt.date(year, month, day)
+
+
+def previous_calendar_month(value: dt.date) -> tuple[dt.date, dt.date]:
+    first = first_day_of_month(value)
+    prev_last = first - dt.timedelta(days=1)
+    return first_day_of_month(prev_last), prev_last
+
+
+def resolve_stock_ancla(args: argparse.Namespace, period_start: dt.date) -> tuple[dt.date, float]:
+    if args.stock_ancla:
+        ancla = parse_user_date(args.stock_ancla)
+        if ancla.day != 1:
+            print(f"Aviso: --stock-ancla {format_date_es(ancla)} no es dia 1; se usa {format_date_es(first_day_of_month(ancla))}")
+            ancla = first_day_of_month(ancla)
+    else:
+        ancla = dt.date(period_start.year, 1, 1)
+    return ancla, float(args.stock_ancla_kg)
+
+
+def fetch_period_kpi_totals(
+    conn: pymssql.Connection,
+    start: dt.date,
+    end: dt.date,
+    data_source: str,
+) -> dict[str, float]:
+    data = build_report_data(conn, start, end, data_source)
+    k = data["kpis"]
+    return {
+        "kg_entrada_tina": k["kg_entrada_tina"],
+        "kg_consumo_tina": k["kg_consumo_tina"],
+        "kg_salida_no_tina": k["kg_salida_no_tina"],
+        "kg_diferencia": k["kg_diferencia"],
+    }
+
+
+def compute_stock_apertura_arrastre(
+    conn: pymssql.Connection,
+    as_of: dt.date,
+    data_source: str,
+    ancla: dt.date,
+    ancla_kg: float,
+) -> tuple[float, list[dict[str, Any]]]:
+    """Stock de apertura en as_of por encadenamiento mensual desde mes ancla."""
+    month_start = first_day_of_month(as_of)
+    trail: list[dict[str, Any]] = []
+    stock = ancla_kg
+    current = ancla
+
+    if month_start < ancla:
+        raise ValueError(
+            f"El periodo ({format_date_es(as_of)}) es anterior al mes ancla ({format_date_es(ancla)})"
+        )
+
+    while current < month_start:
+        month_end = last_day_of_month(current)
+        totals = fetch_period_kpi_totals(conn, current, month_end, data_source)
+        cierre = stock + totals["kg_diferencia"]
+        trail.append({
+            "mes": format_date_es(current),
+            "mes_fin": format_date_es(month_end),
+            "kg_stock_apertura": stock,
+            "kg_entrada_tina": totals["kg_entrada_tina"],
+            "kg_consumo_tina": totals["kg_consumo_tina"],
+            "kg_salida_no_tina": totals["kg_salida_no_tina"],
+            "kg_stock_cierre": cierre,
+        })
+        stock = cierre
+        current = add_months(current, 1)
+
+    if as_of > month_start:
+        partial_end = as_of - dt.timedelta(days=1)
+        if partial_end >= month_start:
+            totals = fetch_period_kpi_totals(conn, month_start, partial_end, data_source)
+            stock += totals["kg_diferencia"]
+
+    return stock, trail
+
+
+def fetch_tinas_arrastradas(
+    conn: pymssql.Connection,
+    start: dt.date,
+    end: dt.date,
+) -> dict[str, float | int]:
+    """Tinas entrada creadas en M-1 (proc_packs.regtime) consumidas en el periodo (matxacts.regtime)."""
+    prev_start, prev_end = previous_calendar_month(start)
+    query = f"""
+    SELECT
+        COUNT(DISTINCT p.id) AS packs,
+        SUM(CAST(x.weight AS float)) AS kg
+    FROM dbo.proc_matxacts x
+    INNER JOIN dbo.proc_packs p ON p.id = x.pack
+    INNER JOIN dbo.proc_materials m ON m.material = p.material
+    WHERE x.xactpath = 1
+      AND LOWER(m.name) LIKE '%tina%'
+      AND {SQL_LEGACY_ES_ENTRADA}
+      AND p.regtime >= %s AND p.regtime < DATEADD(day, 1, %s)
+      AND x.regtime >= %s AND x.regtime < DATEADD(day, 1, %s)
+    """
+    cur = conn.cursor()
+    rows = fetch_rows(cur, query, (prev_start, prev_end, start, end))
+    row = rows[0] if rows else {}
+    return {
+        "packs": int(row.get("packs") or 0),
+        "kg": to_float(row.get("kg")),
+        "mes_origen_inicio": prev_start,
+        "mes_origen_fin": prev_end,
+    }
+
+
+def enrich_arrastre_mensual(
+    report_data: dict[str, Any],
+    stock_inicial: float,
+    trail: list[dict[str, Any]],
+    tinas_arrastradas: dict[str, float | int],
+) -> None:
+    k = report_data["kpis"]
+    k["arrastre_activo"] = True
+    k["kg_stock_inicial_auto"] = True
+    k["arrastre_trail"] = trail
+    k["tinas_arrastradas_packs"] = int(tinas_arrastradas["packs"])
+    k["kg_tinas_arrastradas"] = float(tinas_arrastradas["kg"])
+    k["tinas_arrastradas_desde"] = format_date_es(tinas_arrastradas["mes_origen_inicio"])
+    k["tinas_arrastradas_hasta"] = format_date_es(tinas_arrastradas["mes_origen_fin"])
+    k["kg_stock_cierre_teorico"] = stock_inicial + k["kg_diferencia"]
+
+
+def finalize_balance_kpis(report_data: dict[str, Any]) -> None:
+    """Merma = Entradas TINA - Salidas CAJA - Stock (inventario al cierre). Ver PREMISAS.md."""
+    k = report_data["kpis"]
+    detalle = report_data["detalle_diario"]
+    stock_ini = k.get("kg_stock_inicial")
+    if stock_ini is None:
+        stock_ini = 0.0
+
+    stock_cierre = k.get("kg_stock_final_fisico")
+    if stock_cierre is None:
+        stock_cierre = k.get("kg_stock_cierre_teorico")
+    if stock_cierre is None:
+        if k.get("kg_stock_final_teorico") is not None:
+            stock_cierre = k["kg_stock_final_teorico"]
+        else:
+            stock_cierre = stock_ini + k["kg_diferencia"]
+        k["kg_stock_cierre_teorico"] = stock_cierre
+
+    k["kg_stock_balance"] = stock_cierre
+    k["kg_merma"] = k["kg_entrada_tina"] - k["kg_salida_no_tina"] - stock_cierre
+    k["pct_merma"] = (
+        k["kg_merma"] / k["kg_entrada_tina"] * 100.0 if k["kg_entrada_tina"] else None
+    )
+
+    acumulado = stock_ini
+    for row in detalle:
+        stock_dia = acumulado + row["diferencia_kg"]
+        delta_stock = row["diferencia_kg"]
+        row["kg_stock_balance"] = stock_dia
+        row["kg_merma"] = row["kg_entrada_tina"] - row["kg_salida_no_tina"] - delta_stock
+        acumulado = stock_dia
 
 
 def resolve_dates(args: argparse.Namespace) -> tuple[dt.date, dt.date]:
@@ -275,17 +477,19 @@ def print_console_summary(start: dt.date, end: dt.date, output_path: Path, repor
     print("\nResumen del reporte")
     print("=" * 40)
     print(f"Periodo: {format_date_es(start)} a {format_date_es(end)}")
-    print(f"Entradas de biomasa (kg): {fmt_num(k['kg_entrada_tina'])}")
-    print(f"Cajas (kg): {fmt_num(k['kg_consumo_tina'])}")
-    print(f"Salidas totales kg (todos los graders y basculas): {fmt_num(k['kg_salida_no_tina'])}")
-    print(f"Stock en entradas (rtype<>12, pkpackaging=3): {fmt_num(k.get('kg_stock_entrada', 0))}")
-    print(f"Merma en entradas (rtype=12, pkpackaging=3): {fmt_num(k.get('kg_merma', 0))}")
+    print(f"Entradas TINA (kg): {fmt_num(k['kg_entrada_tina'])}")
+    print(f"TINA procesada (kg): {fmt_num(k['kg_consumo_tina'])}")
+    print(f"Salidas CAJA (kg): {fmt_num(k['kg_salida_no_tina'])}")
+    print(f"Stock inventario cierre (kg): {fmt_num(k.get('kg_stock_balance', 0))}")
+    print(f"Merma (Entradas - Salidas - Stock): {fmt_num(k.get('kg_merma', 0))}")
+    if k.get("pct_merma") is not None:
+      print(f"% Merma sobre entradas: {fmt_pct(k['pct_merma'])}")
     print(f"Diferencia (kg): {fmt_num(k['kg_diferencia'])}")
     print(f"Stock sin procesar fin de periodo (kg): {fmt_num(k['kg_stock_sin_procesar_fin'])}")
     print(f"% Diferencia: {fmt_pct(k['pct_diferencia'])}")
     print(f"Packs entrada: {k['packs_entrada']}")
     print(f"Packs salida: {k['packs_salida']}")
-    print(f"Movimientos de cajas: {k['movs_consumo']}")
+    print(f"Movimientos TINA procesada: {k['movs_consumo']}")
     if k.get("bc_lotes_innova"):
       print(
           f"BC lotes enlazados (number=Lot No.): "
@@ -301,8 +505,17 @@ def print_console_summary(start: dt.date, end: dt.date, output_path: Path, repor
       print(f"BC con pedido (ud. / kg): {fmt_num(k.get('bc_qty_con_pedido', 0))} / {fmt_num(k.get('bc_kg_con_pedido', 0))}")
       print(f"BC sin pedido (ud. / kg): {fmt_num(k.get('bc_qty_sin_pedido', 0))} / {fmt_num(k.get('bc_kg_sin_pedido', 0))}")
     if k.get("kg_stock_inicial") is not None:
-      print(f"Stock inicial (kg): {fmt_num(k['kg_stock_inicial'])}")
+      origen = " (arrastre mensual)" if k.get("kg_stock_inicial_auto") else ""
+      print(f"Stock inicial (kg){origen}: {fmt_num(k['kg_stock_inicial'])}")
       print(f"Stock final teorico (kg): {fmt_num(k['kg_stock_final_teorico'])}")
+    if k.get("kg_stock_cierre_teorico") is not None:
+      print(f"Stock cierre teorico TINA (kg): {fmt_num(k['kg_stock_cierre_teorico'])}")
+    if k.get("arrastre_activo"):
+      print(
+          f"Tinas arrastradas ({k.get('tinas_arrastradas_desde')} a {k.get('tinas_arrastradas_hasta')} "
+          f"consumidas en periodo): {int(k.get('tinas_arrastradas_packs', 0)):,} packs / "
+          f"{fmt_num(k.get('kg_tinas_arrastradas', 0))} kg"
+      )
     if k.get("kg_stock_final_fisico") is not None:
       print(f"Stock final fisico (kg): {fmt_num(k['kg_stock_final_fisico'])}")
       print(f"Ajuste conciliacion (kg): {fmt_num(k['kg_ajuste_conciliacion'])}")
@@ -325,6 +538,8 @@ def enrich_stock_validation(
 
     stock_teorico = stock_inicial + k["kg_diferencia"]
     k["kg_stock_final_teorico"] = stock_teorico
+    if k.get("kg_stock_cierre_teorico") is None:
+      k["kg_stock_cierre_teorico"] = stock_teorico
 
     if stock_final_fisico is not None:
       # Positivo = faltante/merma a justificar, negativo = sobrante.
@@ -348,25 +563,30 @@ def to_float(value: Any) -> float:
 
 # Premisa de entrada/salida/stock/merma (ver PREMISAS.md). Validadas negocio mar-2026.
 PREMISA_ENTRADA_REGLAS = (
-  "Material con pkpackaging = 3 en dbo.proc_materials.",
+  "Entrada TINA: material con pkpackaging = 3 en dbo.proc_materials.",
 )
 PREMISA_SALIDA = (
-  "Salida = material con pkpackaging distinto de 3 (o sin pkpackaging) en dbo.proc_materials."
+  "Salida CAJA: material con pkpackaging distinto de 3 (o sin pkpackaging) en dbo.proc_materials."
 )
-PREMISA_CAJAS = "Cajas = consumo TINA en proc_matxacts (xactpath=1), solo nombre con 'tina'."
+PREMISA_TINA_PROCESADA = (
+  "TINA procesada (kg) en proc_matxacts (xactpath=1), material con 'tina' en el nombre. "
+  "Es entrada TINA, no salida CAJA. "
+  "Fecha diaria: proc_packs.regtime de la TINA (proc_matxacts.pack = proc_packs.id)."
+)
+PREMISA_CAJAS = PREMISA_TINA_PROCESADA  # alias historico en codigo
 PREMISA_SALIDA_REGLAS = (
-  "Material con pkpackaging <> 3 o pkpackaging NULL en dbo.proc_materials.",
+  "Salida CAJA: pkpackaging <> 3 o pkpackaging NULL en dbo.proc_materials.",
 )
 PREMISA_STOCK_MERMA_REGLAS = (
-  "Solo materiales de entrada (pkpackaging = 3) en dbo.proc_packs.",
-  "Stock: rtype <> 12 (o NULL).",
-  "Merma: rtype = 12.",
+  "Stock = inventario TINA al cierre del periodo (sin procesar).",
+  "Merma = desperdicio del procesado; no es stock.",
+  "Balance masa: Entrada TINA = Salidas CAJA + Stock + Merma.",
+  "Merma (kg) = Entrada TINA - Salidas CAJA - Stock.",
+  "Stock cierre = stock inicial + Entradas TINA - TINA procesada (con arrastre mensual).",
 )
 
 SQL_LEGACY_ES_ENTRADA = "m.pkpackaging = 3"
 SQL_LEGACY_ES_SALIDA = "(m.pkpackaging <> 3 OR m.pkpackaging IS NULL)"
-SQL_LEGACY_ES_STOCK = "m.pkpackaging = 3 AND (p.rtype <> 12 OR p.rtype IS NULL)"
-SQL_LEGACY_ES_MERMA = "m.pkpackaging = 3 AND p.rtype = 12"
 
 SQL_VW_STOLT_ES_ENTRADA = "m.pkpackaging = 3"
 SQL_VW_STOLT_ES_SALIDA = "(m.pkpackaging <> 3 OR m.pkpackaging IS NULL)"
@@ -394,12 +614,12 @@ def build_premisa_entrada_html() -> str:
     bc_items = "".join(f"<li>{html.escape(rule)}</li>" for rule in PREMISA_BC_PEDIDO_REGLAS)
     return (
         "<section class='premisa-box'>"
-        "<h3 class='premisa-head'>Premisa de entradas de biomasa</h3>"
+        "<h3 class='premisa-head'>Premisa de entradas TINA</h3>"
         f"<ul class='premisa-list'>{items}</ul>"
-        f"<p class='premisa-note'>{html.escape(PREMISA_CAJAS)}</p>"
-        "<h3 class='premisa-head'>Premisa de salidas de biomasa</h3>"
+        f"<p class='premisa-note'>{html.escape(PREMISA_TINA_PROCESADA)}</p>"
+        "<h3 class='premisa-head'>Premisa de salidas CAJA</h3>"
         f"<ul class='premisa-list'>{salida_items}</ul>"
-        "<h3 class='premisa-head'>Premisa stock / merma (proc_packs)</h3>"
+        "<h3 class='premisa-head'>Premisa stock / merma (balance de masa)</h3>"
         f"<ul class='premisa-list'>{stock_merma_items}</ul>"
         "<h3 class='premisa-head'>Premisa cruce BC (salidas con/sin pedido)</h3>"
         f"<ul class='premisa-list'>{bc_items}</ul>"
@@ -627,10 +847,11 @@ def build_source_definition(data_source: str) -> str:
         return (
             "Fuente: dbo.vw_stolt por fdespesque. "
             + PREMISA_SALIDA
-            + " Stock sin procesar = arrastre acumulado (Entradas - Cajas)."
+            + " Stock sin procesar = arrastre acumulado (Entradas TINA − TINA procesada)."
         )
     return (
-        "Entradas/salidas/cajas por regtime (proc_packs/proc_matxacts). "
+        "Entradas/salidas CAJA por proc_packs.regtime. TINA procesada desde proc_matxacts; "
+        "fecha diaria por proc_packs.regtime de la TINA (proc_matxacts.pack = proc_packs.id). "
         + PREMISA_SALIDA
         + " Stock/arrastre por fdespesque (vw_stolt)."
     )
@@ -796,16 +1017,17 @@ def build_report_data(
 
       q_consumo = """
       SELECT
-        CAST(x.regtime AS date) AS fecha,
+        CAST(p_tina.regtime AS date) AS fecha,
         SUM(CAST(x.weight AS float)) AS kg_consumo_tina,
         COUNT(*) AS movs_consumo
       FROM dbo.proc_matxacts x
+      JOIN dbo.proc_packs p_tina ON p_tina.id = x.pack
       JOIN dbo.proc_materials m ON m.material = x.material
-      WHERE x.regtime >= %s
-        AND x.regtime < DATEADD(day, 1, %s)
+      WHERE p_tina.regtime >= %s
+        AND p_tina.regtime < DATEADD(day, 1, %s)
         AND x.xactpath = 1
         AND LOWER(m.name) LIKE '%tina%'
-      GROUP BY CAST(x.regtime AS date)
+      GROUP BY CAST(p_tina.regtime AS date)
       ORDER BY fecha;
       """
 
@@ -853,34 +1075,6 @@ def build_report_data(
       top_entradas = fetch_rows(cursor, q_top_entrada, params)
       top_salidas = fetch_rows(cursor, q_top_salida, params)
 
-    q_stock_merma = f"""
-    SELECT
-      CAST(p.regtime AS date) AS fecha,
-      SUM(
-        CASE
-          WHEN {SQL_LEGACY_ES_STOCK}
-          THEN CAST(p.weight AS float)
-          ELSE 0.0
-        END
-      ) AS kg_stock,
-      SUM(
-        CASE
-          WHEN {SQL_LEGACY_ES_MERMA}
-          THEN CAST(p.weight AS float)
-          ELSE 0.0
-        END
-      ) AS kg_merma
-    FROM dbo.proc_packs p
-    JOIN dbo.proc_materials m ON m.material = p.material
-    WHERE p.regtime >= %s
-      AND p.regtime < DATEADD(day, 1, %s)
-      AND {SQL_LEGACY_ES_ENTRADA}
-    GROUP BY CAST(p.regtime AS date)
-    ORDER BY fecha;
-    """
-    stock_merma_rows = fetch_rows(cursor, q_stock_merma, params)
-    sql_trace.append({"name": "stock_merma_proc_packs", "query": q_stock_merma.strip()})
-
     by_date: dict[str, dict[str, Any]] = {}
 
     current = start
@@ -894,7 +1088,7 @@ def build_report_data(
             "packs_salida": 0,
             "kg_consumo_tina": 0.0,
             "movs_consumo": 0,
-            "kg_stock": 0.0,
+            "kg_stock_balance": 0.0,
             "kg_merma": 0.0,
             "bc_qty_con_pedido": 0.0,
             "bc_qty_sin_pedido": 0.0,
@@ -924,11 +1118,6 @@ def build_report_data(
         key = row["fecha"].isoformat()
         by_date[key]["kg_consumo_tina"] = to_float(row["kg_consumo_tina"])
         by_date[key]["movs_consumo"] = int(row["movs_consumo"] or 0)
-
-    for row in stock_merma_rows:
-        key = row["fecha"].isoformat()
-        by_date[key]["kg_stock"] = to_float(row["kg_stock"])
-        by_date[key]["kg_merma"] = to_float(row["kg_merma"])
 
     stock_by_despesque: dict[str, dict[str, float]] = {}
     if data_source == "legacy":
@@ -1008,8 +1197,6 @@ def build_report_data(
     tot_entrada = sum(r["kg_entrada_tina"] for r in detalle)
     tot_salida = sum(r["kg_salida_no_tina"] for r in detalle)
     tot_consumo = sum(r["kg_consumo_tina"] for r in detalle)
-    tot_stock = sum(r["kg_stock"] for r in detalle)
-    tot_merma = sum(r["kg_merma"] for r in detalle)
     tot_dif = sum(r["diferencia_kg"] for r in detalle)
     tot_balance = sum(r["balance_entrada_salida_kg"] for r in detalle)
     tot_stock_fin = detalle[-1]["stock_sin_procesar_kg"] if detalle else 0.0
@@ -1018,11 +1205,12 @@ def build_report_data(
         "kg_entrada_tina": tot_entrada,
         "kg_salida_no_tina": tot_salida,
         "kg_consumo_tina": tot_consumo,
-        "kg_stock_entrada": tot_stock,
-        "kg_merma": tot_merma,
         "kg_diferencia": tot_dif,
         "kg_balance_entrada_salida": tot_balance,
         "kg_stock_sin_procesar_fin": tot_stock_fin,
+        "kg_stock_balance": None,
+        "kg_merma": None,
+        "pct_merma": None,
         "pct_diferencia": (tot_dif / tot_entrada * 100.0) if tot_entrada else None,
         "packs_entrada": sum(r["packs_entrada"] for r in detalle),
         "packs_salida": sum(r["packs_salida"] for r in detalle),
@@ -1101,8 +1289,8 @@ def build_stock_merma_table_rows(detalle: list[dict[str, Any]]) -> str:
         if (
             r["kg_entrada_tina"] == 0
             and r["kg_salida_no_tina"] == 0
-            and r["kg_stock"] == 0
-            and r["kg_merma"] == 0
+            and r.get("kg_stock_balance", 0) == 0
+            and r.get("kg_merma", 0) == 0
         ):
             continue
         rows.append(
@@ -1110,8 +1298,8 @@ def build_stock_merma_table_rows(detalle: list[dict[str, Any]]) -> str:
             f"<td>{html.escape(r['fecha'])}</td>"
             f"<td class='num'>{fmt_num(r['kg_entrada_tina'])}</td>"
             f"<td class='num'>{fmt_num(r['kg_salida_no_tina'])}</td>"
-            f"<td class='num'>{fmt_num(r['kg_stock'])}</td>"
-            f"<td class='num'>{fmt_num(r['kg_merma'])}</td>"
+            f"<td class='num'>{fmt_num(r.get('kg_stock_balance', 0))}</td>"
+            f"<td class='num'>{fmt_num(r.get('kg_merma', 0))}</td>"
             f"<td class='num'>{fmt_num(r['balance_entrada_salida_kg'])}</td>"
             "</tr>"
         )
@@ -1181,7 +1369,7 @@ def render_html(
     salida = [round(r["kg_salida_no_tina"], 2) for r in detalle]
     diferencia = [round(r["diferencia_kg"], 2) for r in detalle]
     acumulado = [round(r["acumulado_diferencia_kg"], 2) for r in detalle]
-    stock_entrada = [round(r.get("kg_stock", 0), 2) for r in detalle]
+    stock_entrada = [round(r.get("kg_stock_balance", 0), 2) for r in detalle]
     merma = [round(r.get("kg_merma", 0), 2) for r in detalle]
 
     detail_rows_html = build_table_rows(detalle)
@@ -1268,15 +1456,41 @@ def render_html(
       )
     trace_queries_html = "\n".join(trace_query_items)
     if k.get("kg_stock_inicial") is not None:
+      sub_ini = (
+        "Calculado por arrastre mensual"
+        if k.get("kg_stock_inicial_auto")
+        else "Dato ingresado por usuario"
+      )
       stock_cards_html += (
         f"<article class='card'><div class='kpi-title'>Stock inicial (kg)</div>"
         f"<div class='kpi-value'>{fmt_num(k['kg_stock_inicial'])}</div>"
-        "<div class='kpi-sub'>Dato ingresado por usuario</div></article>"
+        f"<div class='kpi-sub'>{html.escape(sub_ini)}</div></article>"
       )
       stock_cards_html += (
         f"<article class='card'><div class='kpi-title'>Stock final teorico sin procesar (kg)</div>"
         f"<div class='kpi-value'>{fmt_num(k['kg_stock_final_teorico'])}</div>"
-        "<div class='kpi-sub'>Stock inicial + Entradas - Consumo</div></article>"
+        "<div class='kpi-sub'>Stock inicial + Entradas TINA - TINA procesada</div></article>"
+      )
+    if k.get("kg_stock_balance") is not None:
+      stock_cards_html += (
+        f"<article class='card'><div class='kpi-title'>Stock inventario cierre (kg)</div>"
+        f"<div class='kpi-value'>{fmt_num(k['kg_stock_balance'])}</div>"
+        "<div class='kpi-sub'>Inventario TINA sin procesar al cierre</div></article>"
+      )
+    if k.get("kg_merma") is not None:
+      pct_txt = f" · {fmt_pct(k['pct_merma'])} sobre entradas" if k.get("pct_merma") is not None else ""
+      stock_cards_html += (
+        f"<article class='card'><div class='kpi-title'>Merma (kg)</div>"
+        f"<div class='kpi-value'>{fmt_num(k['kg_merma'])}</div>"
+        f"<div class='kpi-sub'>Entradas TINA - Salidas CAJA - Stock{pct_txt}</div></article>"
+      )
+    if k.get("arrastre_activo"):
+      stock_cards_html += (
+        f"<article class='card'><div class='kpi-title'>Tinas arrastradas (kg)</div>"
+        f"<div class='kpi-value'>{fmt_num(k.get('kg_tinas_arrastradas', 0))}</div>"
+        f"<div class='kpi-sub'>{int(k.get('tinas_arrastradas_packs', 0)):,} packs de "
+        f"{html.escape(str(k.get('tinas_arrastradas_desde', '')))} a "
+        f"{html.escape(str(k.get('tinas_arrastradas_hasta', '')))}</div></article>"
       )
     if k.get("kg_stock_final_fisico") is not None:
       stock_cards_html += (
@@ -1288,6 +1502,36 @@ def render_html(
         f"<article class='card'><div class='kpi-title'>Ajuste conciliacion (kg)</div>"
         f"<div class='kpi-value'>{fmt_num(k['kg_ajuste_conciliacion'])}</div>"
         "<div class='kpi-sub'>Teorico - Fisico</div></article>"
+      )
+
+    arrastre_trail_html = ""
+    trail = k.get("arrastre_trail") or []
+    if trail:
+      trail_rows = []
+      for row in trail:
+        trail_rows.append(
+          "<tr>"
+          f"<td>{html.escape(str(row.get('mes', '')))}</td>"
+          f"<td class='num'>{fmt_num(row.get('kg_stock_apertura', 0))}</td>"
+          f"<td class='num'>{fmt_num(row.get('kg_entrada_tina', 0))}</td>"
+          f"<td class='num'>{fmt_num(row.get('kg_consumo_tina', 0))}</td>"
+          f"<td class='num'>{fmt_num(row.get('kg_salida_no_tina', 0))}</td>"
+          f"<td class='num'>{fmt_num(row.get('kg_stock_cierre', 0))}</td>"
+          "</tr>"
+        )
+      arrastre_trail_html = (
+        "<section class='tables'>"
+        "<article class='table-card'>"
+        "<h3>Encadenamiento mensual (arrastre de stock TINA)</h3>"
+        "<p class='table-note'>Stock cierre = apertura + Entradas TINA - TINA procesada. "
+        "El stock de apertura del periodo reportado es el cierre del ultimo mes de esta tabla.</p>"
+        "<div class='table-wrap'><table class='data-table' id='tblArrastre'>"
+        "<thead><tr>"
+        "<th>Mes</th><th>Apertura (kg)</th><th>Entradas TINA</th>"
+        "<th>TINA procesada</th><th>Salidas CAJA</th><th>Cierre (kg)</th>"
+        "</tr></thead><tbody>"
+        + "".join(trail_rows)
+        + "</tbody></table></div></article></section>"
       )
 
     return f"""<!doctype html>
@@ -1612,20 +1856,22 @@ def render_html(
     {premisa_entrada_html}
 
     <section class="grid">
-      <article class="card"><div class="kpi-title">Entradas de biomasa (kg)</div><div class="kpi-value">{fmt_num(k['kg_entrada_tina'])}</div><div class="kpi-sub">{k['packs_entrada']} packs · Stock+Merma</div></article>
-      <article class="card"><div class="kpi-title">Stock en entradas (kg)</div><div class="kpi-value">{fmt_num(k.get('kg_stock_entrada', 0))}</div><div class="kpi-sub">pkpackaging=3, rtype distinto de 12</div></article>
-      <article class="card"><div class="kpi-title">Merma en entradas (kg)</div><div class="kpi-value">{fmt_num(k.get('kg_merma', 0))}</div><div class="kpi-sub">pkpackaging=3, rtype=12</div></article>
-      <article class="card"><div class="kpi-title">Cajas (kg)</div><div class="kpi-value">{fmt_num(k['kg_consumo_tina'])}</div><div class="kpi-sub">{k['movs_consumo']} movimientos</div></article>
-      <article class="card"><div class="kpi-title">Diferencia (kg)</div><div class="kpi-value">{fmt_num(k['kg_diferencia'])}</div><div class="kpi-sub">% diferencia: {fmt_pct(k['pct_diferencia'])} · Entradas - Cajas</div></article>
-      <article class="card"><div class="kpi-title">Salidas totales kg (todos los graders y basculas)</div><div class="kpi-value">{fmt_num(k['kg_salida_no_tina'])}</div><div class="kpi-sub">{k['packs_salida']} packs</div></article>
-      <article class="card"><div class="kpi-title">Balance entradas - salidas (kg)</div><div class="kpi-value">{fmt_num(k['kg_balance_entrada_salida'])}</div><div class="kpi-sub">Diferencia E-S del periodo</div></article>
-      <article class="card"><div class="kpi-title">Stock sin procesar fin de periodo (kg)</div><div class="kpi-value">{fmt_num(k['kg_stock_sin_procesar_fin'])}</div><div class="kpi-sub">Arrastre acumulado de Entradas - Cajas</div></article>
+      <article class="card"><div class="kpi-title">Entradas TINA (kg)</div><div class="kpi-value">{fmt_num(k['kg_entrada_tina'])}</div><div class="kpi-sub">{k['packs_entrada']} packs</div></article>
+      <article class="card"><div class="kpi-title">TINA procesada (kg)</div><div class="kpi-value">{fmt_num(k['kg_consumo_tina'])}</div><div class="kpi-sub">{k['movs_consumo']} movimientos · entrada, no CAJA</div></article>
+      <article class="card"><div class="kpi-title">Salidas CAJA (kg)</div><div class="kpi-value">{fmt_num(k['kg_salida_no_tina'])}</div><div class="kpi-sub">{k['packs_salida']} packs · graders y basculas</div></article>
+      <article class="card"><div class="kpi-title">Stock inventario (kg)</div><div class="kpi-value">{fmt_num(k.get('kg_stock_balance', 0))}</div><div class="kpi-sub">Al cierre · Entrada = Salida + Stock + Merma</div></article>
+      <article class="card"><div class="kpi-title">Merma (kg)</div><div class="kpi-value">{fmt_num(k.get('kg_merma', 0))}</div><div class="kpi-sub">Entradas - Salidas - Stock · {fmt_pct(k.get('pct_merma'))}</div></article>
+      <article class="card"><div class="kpi-title">Diferencia (kg)</div><div class="kpi-value">{fmt_num(k['kg_diferencia'])}</div><div class="kpi-sub">Entradas TINA − TINA procesada · {fmt_pct(k['pct_diferencia'])}</div></article>
+      <article class="card"><div class="kpi-title">Balance TINA − CAJA (kg)</div><div class="kpi-value">{fmt_num(k['kg_balance_entrada_salida'])}</div><div class="kpi-sub">Entradas TINA − Salidas CAJA</div></article>
+      <article class="card"><div class="kpi-title">Stock sin procesar fin de periodo (kg)</div><div class="kpi-value">{fmt_num(k['kg_stock_sin_procesar_fin'])}</div><div class="kpi-sub">Arrastre: Entradas TINA − TINA procesada</div></article>
       <article class="card"><div class="kpi-title">BC lotes enlazados</div><div class="kpi-value">{int(k.get('bc_lotes_enlazados', 0)):,} / {int(k.get('bc_lotes_innova', 0)):,}</div><div class="kpi-sub">{fmt_pct(k.get('bc_pct_lotes_enlazados'))} · number = Lot No.</div></article>
       <article class="card"><div class="kpi-title">Kg Innova enlazado</div><div class="kpi-value">{fmt_num(k.get('bc_kg_innova_enlazado', 0))}</div><div class="kpi-sub">Salidas Innova con lote en BC</div></article>
       <article class="card"><div class="kpi-title">BC Kilos enlazados (ILE)</div><div class="kpi-value">{fmt_num(k.get('bc_kg_bc_enlazado', 0))}</div><div class="kpi-sub">Campo [Kilos] · dif.: {fmt_num(k.get('bc_kg_diferencia_enlazado', 0))} kg</div></article>
       <article class="card"><div class="kpi-title">BC con pedido</div><div class="kpi-value">{fmt_num(k.get('bc_qty_con_pedido', 0))} ud.</div><div class="kpi-sub">{fmt_num(k.get('bc_kg_con_pedido', 0))} kg · sin pedido: {fmt_num(k.get('bc_qty_sin_pedido', 0))} ud.</div></article>
       {stock_cards_html}
     </section>
+
+    {arrastre_trail_html}
 
     <section class="trace-box">
       <h3 class="trace-head">Trazabilidad SQL</h3>
@@ -1652,7 +1898,7 @@ def render_html(
         <canvas id="donutTotals"></canvas>
       </article>
       <article class="chart-card chart-panel">
-        <h3>Stock y merma diarios en entradas (kg)</h3>
+        <h3>Stock y merma diarios (balance de masa)</h3>
         <button type="button" class="btn-max" data-chart="lineStockMerma">Maximizar</button>
         <canvas id="lineStockMerma"></canvas>
       </article>
@@ -1676,12 +1922,12 @@ def render_html(
           <thead>
             <tr>
               <th>Fecha</th>
-              <th class="num">Entradas de biomasa</th>
-              <th class="num">Cajas (kg)</th>
+              <th class="num">Entradas TINA (kg)</th>
+              <th class="num">TINA procesada (kg)</th>
               <th class="num">Diferencia</th>
               <th class="num">% Diferencia</th>
-              <th class="num">Salidas totales kg</th>
-              <th class="num">Balance E-S</th>
+              <th class="num">Salidas CAJA (kg)</th>
+              <th class="num">Balance TINA−CAJA</th>
               <th class="num">Acum. Diferencia</th>
               <th class="num">Stock sin procesar</th>
             </tr>
@@ -1712,8 +1958,8 @@ def render_html(
           </button>
         </div>
         <p class="muted" style="margin-top:0;">
-          Stock y merma desglosan las entradas (pkpackaging=3) por proc_packs.rtype:
-          rtype=12 es merma; rtype distinto de 12 es stock. Entradas = Stock + Merma.
+          Balance de masa: Entrada TINA = Salidas CAJA + Stock + Merma.
+          Merma (kg) = Entradas - Salidas - Stock. Stock = inventario TINA acumulado al cierre de cada dia.
         </p>
         <table id="stockMermaTable">
           <thead>
@@ -1723,7 +1969,7 @@ def render_html(
               <th class="num">Salidas (kg)</th>
               <th class="num">Stock (kg)</th>
               <th class="num">Merma (kg)</th>
-              <th class="num">Diferencia E-S (kg)</th>
+              <th class="num">Balance E-S (kg)</th>
             </tr>
           </thead>
           <tbody>
@@ -1732,7 +1978,7 @@ def render_html(
               <td><strong>TOTAL</strong></td>
               <td class="num"><strong>{fmt_num(k['kg_entrada_tina'])}</strong></td>
               <td class="num"><strong>{fmt_num(k['kg_salida_no_tina'])}</strong></td>
-              <td class="num"><strong>{fmt_num(k.get('kg_stock_entrada', 0))}</strong></td>
+              <td class="num"><strong>{fmt_num(k.get('kg_stock_balance', 0))}</strong></td>
               <td class="num"><strong>{fmt_num(k.get('kg_merma', 0))}</strong></td>
               <td class="num"><strong>{fmt_num(k['kg_balance_entrada_salida'])}</strong></td>
             </tr>
@@ -1798,9 +2044,9 @@ const chartConfigs = {{
     data: {{
       labels,
       datasets: [
-        {{ label: 'Entradas de biomasa', data: entrada, borderColor: '#0b6e4f', tension: 0.25, fill: false }},
-        {{ label: 'Cajas (kg)', data: consumo, borderColor: '#dc2626', tension: 0.25, fill: false }},
-        {{ label: 'Salidas totales kg', data: salida, borderColor: '#2563eb', tension: 0.25, fill: false }}
+        {{ label: 'Entradas TINA (kg)', data: entrada, borderColor: '#0b6e4f', tension: 0.25, fill: false }},
+        {{ label: 'TINA procesada (kg)', data: consumo, borderColor: '#dc2626', tension: 0.25, fill: false }},
+        {{ label: 'Salidas CAJA (kg)', data: salida, borderColor: '#2563eb', tension: 0.25, fill: false }}
       ]
     }},
     options: {{ responsive: true, maintainAspectRatio: false }}
@@ -1825,15 +2071,14 @@ const chartConfigs = {{
   donutTotals: {{
     type: 'doughnut',
     data: {{
-      labels: ['Stock en entradas', 'Merma', 'Salidas', 'Cajas (kg)'],
+      labels: ['Stock', 'Merma', 'Salidas CAJA'],
       datasets: [{{
         data: [
-          {k.get('kg_stock_entrada', 0):.2f},
-          {k.get('kg_merma', 0):.2f},
-          {k['kg_salida_no_tina']:.2f},
-          {k['kg_consumo_tina']:.2f}
+          {k.get('kg_stock_balance', 0):.2f},
+          {max(k.get('kg_merma', 0), 0):.2f},
+          {k['kg_salida_no_tina']:.2f}
         ],
-        backgroundColor: ['#0b6e4f', '#f59e0b', '#2563eb', '#dc2626']
+        backgroundColor: ['#0b6e4f', '#f59e0b', '#2563eb']
       }}]
     }},
     options: {{ responsive: true, maintainAspectRatio: false }}
@@ -1843,8 +2088,8 @@ const chartConfigs = {{
     data: {{
       labels,
       datasets: [
-        {{ label: 'Stock en entradas', data: stockEntrada, borderColor: '#0b6e4f', tension: 0.25, fill: false }},
-        {{ label: 'Merma', data: merma, borderColor: '#f59e0b', tension: 0.25, fill: false }}
+        {{ label: 'Stock inventario', data: stockEntrada, borderColor: '#0b6e4f', tension: 0.25, fill: false }},
+        {{ label: 'Merma (balance)', data: merma, borderColor: '#f59e0b', tension: 0.25, fill: false }}
       ]
     }},
     options: {{ responsive: true, maintainAspectRatio: false }}
@@ -1996,8 +2241,13 @@ def main() -> None:
     load_dotenv_file(env_path)
     logo_data_uri = load_logo_data_uri(base_dir)
     args = parse_args()
-    if args.stock_final_fisico is not None and args.stock_inicial is None:
-      raise ValueError("Si informa --stock-final-fisico tambien debe informar --stock-inicial")
+    stock_inicial_manual, stock_inicial_auto = parse_stock_inicial_arg(args.stock_inicial)
+    use_arrastre = args.arrastre_mensual or stock_inicial_auto
+    if args.stock_final_fisico is not None and not use_arrastre and stock_inicial_manual is None:
+      raise ValueError(
+          "Si informa --stock-final-fisico tambien debe informar --stock-inicial "
+          "o activar --arrastre-mensual / --stock-inicial auto"
+      )
     start, end = resolve_dates(args)
     db_user, db_password = resolve_db_credentials(args)
 
@@ -2021,7 +2271,20 @@ def main() -> None:
 
     try:
         report_data = build_report_data(conn, start, end, args.data_source)
-        enrich_stock_validation(report_data, args.stock_inicial, args.stock_final_fisico)
+        stock_inicial = stock_inicial_manual
+        arrastre_trail: list[dict[str, Any]] = []
+        if use_arrastre:
+            ancla, ancla_kg = resolve_stock_ancla(args, start)
+            print(
+                f"Calculando arrastre mensual (ancla {format_date_es(ancla)} = {fmt_num(ancla_kg)} kg)..."
+            )
+            stock_inicial, arrastre_trail = compute_stock_apertura_arrastre(
+                conn, start, args.data_source, ancla, ancla_kg
+            )
+            tinas_arrastradas = fetch_tinas_arrastradas(conn, start, end)
+            enrich_arrastre_mensual(report_data, stock_inicial, arrastre_trail, tinas_arrastradas)
+        enrich_stock_validation(report_data, stock_inicial, args.stock_final_fisico)
+        finalize_balance_kpis(report_data)
         innova_lotes = fetch_innova_salidas_lotes(conn, start, end)
     finally:
         conn.close()

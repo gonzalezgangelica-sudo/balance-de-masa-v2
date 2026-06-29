@@ -70,9 +70,9 @@ def build_document(output_path: Path) -> None:
         doc,
         [
             "Centraliza metricas que antes requerian consultas manuales en Innova y BC.",
-            "Aplica reglas de negocio acordadas (pkpackaging, rtype, cajas TINA) de forma consistente.",
+            "Aplica reglas de negocio acordadas (pkpackaging, balance de masa) de forma consistente.",
             "Permite seguimiento diario del balance entradas − cajas y entradas − salidas.",
-            "Desglosa las entradas en stock y merma segun proc_packs.rtype.",
+            "Calcula stock y merma: Entrada TINA = Salidas CAJA + Stock + Merma.",
             "Cruza salidas Innova con albaranes BC por codigo de lote (number = Lot No.).",
             "Compara kilos Innova vs kilos BC ([Kilos] en Item Ledger Entry) en lotes enlazados.",
             "Facilita exportacion a Excel para reuniones, auditorias y analisis ad hoc.",
@@ -85,7 +85,7 @@ def build_document(output_path: Path) -> None:
         ["Sistema", "Objeto / tabla", "Uso"],
         [
             ["Innova (SQL Server)", "dbo.proc_packs + dbo.proc_materials", "Entradas, salidas, stock/merma por regtime"],
-            ["Innova", "dbo.proc_matxacts", "Consumo de cajas TINA (xactpath = 1)"],
+            ["Innova", "dbo.proc_matxacts + dbo.proc_packs", "Kg cajas = consumo TINA; fecha diaria = regtime de la tina (pack = proc_packs.id)"],
             ["Innova", "dbo.vw_stolt", "Arrastre stock sin procesar (fdespesque)"],
             ["Business Central (Azure SQL)", "bc.[Item Ledger Entry]", "Ventas por lote; campo [Kilos]"],
             ["Business Central", "bc.[Sales Shipment Line]", "Pedido ([Order No.]) del albaran"],
@@ -99,10 +99,10 @@ def build_document(output_path: Path) -> None:
         [
             ["Entrada de biomasa", "proc_materials.pkpackaging = 3"],
             ["Salida", "pkpackaging <> 3 o NULL"],
-            ["Stock (en entradas)", "pkpackaging = 3 y proc_packs.rtype <> 12 (o NULL)"],
-            ["Merma (en entradas)", "pkpackaging = 3 y proc_packs.rtype = 12"],
-            ["Cajas (kg)", "Consumo TINA en proc_matxacts, xactpath = 1, nombre con 'tina'"],
-            ["Identidad", "Entradas = Stock + Merma"],
+            ["Stock", "Inventario TINA al cierre: stock inicial + Entradas − TINA procesada"],
+            ["Merma", "Entrada TINA − Salidas CAJA − Stock (no es proc_packs.rtype)"],
+            ["TINA procesada (kg)", "proc_matxacts (xactpath=1, nombre con 'tina'); fecha = proc_packs.regtime de la TINA"],
+            ["Balance masa", "Entrada TINA = Salidas CAJA + Stock + Merma"],
         ],
     )
     add_para(doc, "Documento tecnico de referencia: PREMISAS.md en el repositorio del proyecto.")
@@ -112,7 +112,8 @@ def build_document(output_path: Path) -> None:
         doc,
         ["Metrica", "Formula / significado"],
         [
-            ["Diferencia (kg)", "Entradas − Cajas (consumo TINA)"],
+            ["Merma (kg)", "Entradas TINA − Salidas CAJA − Stock"],
+            ["Diferencia (kg)", "Entradas TINA − TINA procesada"],
             ["Balance E-S (kg)", "Entradas − Salidas"],
             ["Stock sin procesar", "Arrastre acumulado (Entradas − Cajas o vw_stolt segun modo)"],
             ["% diferencia", "Diferencia / Entradas × 100"],
@@ -126,9 +127,8 @@ def build_document(output_path: Path) -> None:
     add_bullets(
         doc,
         [
-            "Entradas de biomasa (kg y packs)",
-            "Stock en entradas y merma en entradas (kg)",
-            "Cajas consumidas (kg y movimientos)",
+            "Entradas TINA, salidas CAJA, stock inventario y merma (balance de masa)",
+            "TINA procesada (kg y movimientos)",
             "Diferencia y balance entradas − salidas",
             "Stock sin procesar a fin de periodo",
             "Cruce BC: lotes enlazados, kg Innova vs kg BC, con/sin pedido",
@@ -232,7 +232,7 @@ def build_document(output_path: Path) -> None:
             "Lotes sin enlace (~13 % en marzo 2026) pueden deberse a desfase de fechas o contabilizacion pendiente.",
             "El pedido BC se obtiene del albaran (Sales Shipment Line), no del pack Innova.",
             "Stock/merma describe entradas en Innova, no inventario fisico de almacen salvo validacion opcional.",
-            "Cambios en maestros (pkpackaging, rtype) requieren actualizar PREMISAS.md y regenerar mes de control.",
+            "Cambios en maestros (pkpackaging) requieren actualizar PREMISAS.md y regenerar mes de control.",
         ],
     )
 
