@@ -323,8 +323,8 @@
       <article class="card"><div class="kpi-title">Entradas TINA (kg)</div><div class="kpi-value">665,081.58</div><div class="kpi-sub">2896 packs</div></article>
       <article class="card"><div class="kpi-title">TINA procesada (kg)</div><div class="kpi-value">429,619.00</div><div class="kpi-sub">1671 movimientos · entrada, no CAJA</div></article>
       <article class="card"><div class="kpi-title">Salidas CAJA (kg)</div><div class="kpi-value">492,968.78</div><div class="kpi-sub">80737 packs · graders y basculas</div></article>
-      <article class="card"><div class="kpi-title">Stock inventario (kg)</div><div class="kpi-value">235,462.58</div><div class="kpi-sub">Al cierre · Entrada = Salida + Stock + Merma</div></article>
-      <article class="card"><div class="kpi-title">Merma (kg)</div><div class="kpi-value">-63,349.78</div><div class="kpi-sub">Entradas - Salidas - Stock · -9.53%</div></article>
+      <article class="card"><div class="kpi-title">Stock inventario (kg)</div><div class="kpi-value">678,373.33</div><div class="kpi-sub">Al cierre · Entrada = Salida + Stock + Merma</div></article>
+      <article class="card"><div class="kpi-title">Merma (kg)</div><div class="kpi-value">-506,260.53</div><div class="kpi-sub">Entradas - Salidas - Stock · -76.12%</div></article>
       <article class="card"><div class="kpi-title">Diferencia (kg)</div><div class="kpi-value">235,462.58</div><div class="kpi-sub">Entradas TINA − TINA procesada · 35.40%</div></article>
       <article class="card"><div class="kpi-title">Balance TINA − CAJA (kg)</div><div class="kpi-value">172,112.80</div><div class="kpi-sub">Entradas TINA − Salidas CAJA</div></article>
       <article class="card"><div class="kpi-title">Stock sin procesar fin de periodo (kg)</div><div class="kpi-value">-90,896.04</div><div class="kpi-sub">Arrastre: Entradas TINA − TINA procesada</div></article>
@@ -332,10 +332,10 @@
       <article class="card"><div class="kpi-title">Kg Innova enlazado</div><div class="kpi-value">0.00</div><div class="kpi-sub">Salidas Innova con lote en BC</div></article>
       <article class="card"><div class="kpi-title">BC Kilos enlazados (ILE)</div><div class="kpi-value">0.00</div><div class="kpi-sub">Campo [Kilos] · dif.: 0.00 kg</div></article>
       <article class="card"><div class="kpi-title">BC con pedido</div><div class="kpi-value">0.00 ud.</div><div class="kpi-sub">0.00 kg · sin pedido: 0.00 ud.</div></article>
-      <article class='card'><div class='kpi-title'>Stock inventario cierre (kg)</div><div class='kpi-value'>235,462.58</div><div class='kpi-sub'>Inventario TINA sin procesar al cierre</div></article><article class='card'><div class='kpi-title'>Merma (kg)</div><div class='kpi-value'>-63,349.78</div><div class='kpi-sub'>Entradas TINA - Salidas CAJA - Stock · -9.53% sobre entradas</div></article>
+      <article class='card'><div class='kpi-title'>Stock inicial (kg)</div><div class='kpi-value'>442,910.75</div><div class='kpi-sub'>Calculado por arrastre mensual</div></article><article class='card'><div class='kpi-title'>Stock final teorico sin procesar (kg)</div><div class='kpi-value'>678,373.33</div><div class='kpi-sub'>Stock inicial + Entradas TINA - TINA procesada</div></article><article class='card'><div class='kpi-title'>Stock inventario cierre (kg)</div><div class='kpi-value'>678,373.33</div><div class='kpi-sub'>Inventario TINA sin procesar al cierre</div></article><article class='card'><div class='kpi-title'>Merma (kg)</div><div class='kpi-value'>-506,260.53</div><div class='kpi-sub'>Entradas TINA - Salidas CAJA - Stock · -76.12% sobre entradas</div></article><article class='card'><div class='kpi-title'>Tinas arrastradas (kg)</div><div class='kpi-value'>11,715.00</div><div class='kpi-sub'>43 packs de 01/02/2026 a 28/02/2026</div></article>
     </section>
 
-    
+    <section class='tables'><article class='table-card'><h3>Encadenamiento mensual (arrastre de stock TINA)</h3><p class='table-note'>Stock cierre = apertura + Entradas TINA - TINA procesada. El stock de apertura del periodo reportado es el cierre del ultimo mes de esta tabla.</p><div class='table-wrap'><table class='data-table' id='tblArrastre'><thead><tr><th>Mes</th><th>Apertura (kg)</th><th>Entradas TINA</th><th>TINA procesada</th><th>Salidas CAJA</th><th>Cierre (kg)</th></tr></thead><tbody><tr><td>01/01/2026</td><td class='num'>0.00</td><td class='num'>571,996.04</td><td class='num'>379,157.00</td><td class='num'>446,162.12</td><td class='num'>192,839.04</td></tr><tr><td>01/02/2026</td><td class='num'>192,839.04</td><td class='num'>610,984.71</td><td class='num'>360,913.00</td><td class='num'>421,908.79</td><td class='num'>442,910.75</td></tr></tbody></table></div></article></section>
 
     <section class="trace-box">
       <h3 class="trace-head">Trazabilidad SQL</h3>
@@ -545,42 +545,43 @@
             </tr>
           </thead>
           <tbody>
-            <tr><td>02/03/2026</td><td class='num'>30,889.72</td><td class='num'>15,743.19</td><td class='num'>17,611.72</td><td class='num'>-2,465.19</td><td class='num'>15,146.54</td></tr>
-<tr><td>03/03/2026</td><td class='num'>21,629.32</td><td class='num'>13,337.90</td><td class='num'>26,488.05</td><td class='num'>-584.90</td><td class='num'>8,291.42</td></tr>
-<tr><td>04/03/2026</td><td class='num'>24,597.80</td><td class='num'>15,568.29</td><td class='num'>31,476.84</td><td class='num'>4,040.71</td><td class='num'>9,029.51</td></tr>
-<tr><td>05/03/2026</td><td class='num'>32,187.93</td><td class='num'>27,964.27</td><td class='num'>36,082.77</td><td class='num'>-382.27</td><td class='num'>4,223.66</td></tr>
-<tr><td>06/03/2026</td><td class='num'>24,424.34</td><td class='num'>26,776.17</td><td class='num'>47,078.11</td><td class='num'>-13,347.17</td><td class='num'>-2,351.84</td></tr>
-<tr><td>07/03/2026</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>47,078.11</td><td class='num'>0.00</td><td class='num'>0.00</td></tr>
-<tr><td>08/03/2026</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>47,078.11</td><td class='num'>0.00</td><td class='num'>0.00</td></tr>
-<tr><td>09/03/2026</td><td class='num'>26,373.11</td><td class='num'>15,348.12</td><td class='num'>63,057.22</td><td class='num'>-4,954.12</td><td class='num'>11,024.99</td></tr>
-<tr><td>10/03/2026</td><td class='num'>25,238.34</td><td class='num'>12,780.35</td><td class='num'>74,305.56</td><td class='num'>1,209.65</td><td class='num'>12,457.99</td></tr>
-<tr><td>11/03/2026</td><td class='num'>23,134.62</td><td class='num'>16,328.29</td><td class='num'>75,436.17</td><td class='num'>5,675.71</td><td class='num'>6,806.33</td></tr>
-<tr><td>12/03/2026</td><td class='num'>34,773.66</td><td class='num'>30,844.37</td><td class='num'>83,064.83</td><td class='num'>-3,699.37</td><td class='num'>3,929.29</td></tr>
-<tr><td>13/03/2026</td><td class='num'>16,089.15</td><td class='num'>27,912.74</td><td class='num'>86,506.98</td><td class='num'>-15,265.74</td><td class='num'>-11,823.59</td></tr>
-<tr><td>14/03/2026</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>86,506.98</td><td class='num'>0.00</td><td class='num'>0.00</td></tr>
-<tr><td>15/03/2026</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>86,506.98</td><td class='num'>0.00</td><td class='num'>0.00</td></tr>
-<tr><td>16/03/2026</td><td class='num'>34,023.64</td><td class='num'>13,874.41</td><td class='num'>98,211.62</td><td class='num'>8,444.59</td><td class='num'>20,149.23</td></tr>
-<tr><td>17/03/2026</td><td class='num'>42,962.55</td><td class='num'>22,247.07</td><td class='num'>118,984.18</td><td class='num'>-57.07</td><td class='num'>20,715.48</td></tr>
-<tr><td>18/03/2026</td><td class='num'>25,880.55</td><td class='num'>34,791.83</td><td class='num'>126,209.73</td><td class='num'>-16,136.83</td><td class='num'>-8,911.28</td></tr>
-<tr><td>19/03/2026</td><td class='num'>15,943.68</td><td class='num'>16,552.51</td><td class='num'>128,499.40</td><td class='num'>-2,898.51</td><td class='num'>-608.83</td></tr>
-<tr><td>20/03/2026</td><td class='num'>22,665.94</td><td class='num'>17,455.13</td><td class='num'>136,173.34</td><td class='num'>-2,463.13</td><td class='num'>5,210.81</td></tr>
-<tr><td>21/03/2026</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>136,173.34</td><td class='num'>0.00</td><td class='num'>0.00</td></tr>
-<tr><td>22/03/2026</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>136,173.34</td><td class='num'>0.00</td><td class='num'>0.00</td></tr>
-<tr><td>23/03/2026</td><td class='num'>34,764.61</td><td class='num'>17,251.32</td><td class='num'>153,073.95</td><td class='num'>612.68</td><td class='num'>17,513.29</td></tr>
-<tr><td>24/03/2026</td><td class='num'>47,194.00</td><td class='num'>16,914.55</td><td class='num'>177,907.95</td><td class='num'>5,445.45</td><td class='num'>30,279.45</td></tr>
-<tr><td>25/03/2026</td><td class='num'>45,887.22</td><td class='num'>28,166.56</td><td class='num'>200,113.17</td><td class='num'>-4,484.56</td><td class='num'>17,720.65</td></tr>
-<tr><td>26/03/2026</td><td class='num'>44,332.88</td><td class='num'>32,124.06</td><td class='num'>211,218.05</td><td class='num'>1,103.94</td><td class='num'>12,208.82</td></tr>
-<tr><td>27/03/2026</td><td class='num'>30,068.07</td><td class='num'>31,654.14</td><td class='num'>220,337.12</td><td class='num'>-10,705.14</td><td class='num'>-1,586.07</td></tr>
-<tr><td>28/03/2026</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>220,337.12</td><td class='num'>0.00</td><td class='num'>0.00</td></tr>
-<tr><td>29/03/2026</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>220,337.12</td><td class='num'>0.00</td><td class='num'>0.00</td></tr>
-<tr><td>30/03/2026</td><td class='num'>37,860.19</td><td class='num'>34,405.48</td><td class='num'>229,707.31</td><td class='num'>-5,915.48</td><td class='num'>3,454.71</td></tr>
-<tr><td>31/03/2026</td><td class='num'>24,160.27</td><td class='num'>24,928.02</td><td class='num'>235,462.58</td><td class='num'>-6,523.02</td><td class='num'>-767.75</td></tr>
+            <tr><td>01/03/2026</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>442,910.75</td><td class='num'>0.00</td><td class='num'>0.00</td></tr>
+<tr><td>02/03/2026</td><td class='num'>30,889.72</td><td class='num'>15,743.19</td><td class='num'>460,522.47</td><td class='num'>-2,465.19</td><td class='num'>15,146.54</td></tr>
+<tr><td>03/03/2026</td><td class='num'>21,629.32</td><td class='num'>13,337.90</td><td class='num'>469,398.80</td><td class='num'>-584.90</td><td class='num'>8,291.42</td></tr>
+<tr><td>04/03/2026</td><td class='num'>24,597.80</td><td class='num'>15,568.29</td><td class='num'>474,387.59</td><td class='num'>4,040.71</td><td class='num'>9,029.51</td></tr>
+<tr><td>05/03/2026</td><td class='num'>32,187.93</td><td class='num'>27,964.27</td><td class='num'>478,993.52</td><td class='num'>-382.27</td><td class='num'>4,223.66</td></tr>
+<tr><td>06/03/2026</td><td class='num'>24,424.34</td><td class='num'>26,776.17</td><td class='num'>489,988.86</td><td class='num'>-13,347.17</td><td class='num'>-2,351.84</td></tr>
+<tr><td>07/03/2026</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>489,988.86</td><td class='num'>0.00</td><td class='num'>0.00</td></tr>
+<tr><td>08/03/2026</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>489,988.86</td><td class='num'>0.00</td><td class='num'>0.00</td></tr>
+<tr><td>09/03/2026</td><td class='num'>26,373.11</td><td class='num'>15,348.12</td><td class='num'>505,967.96</td><td class='num'>-4,954.12</td><td class='num'>11,024.99</td></tr>
+<tr><td>10/03/2026</td><td class='num'>25,238.34</td><td class='num'>12,780.35</td><td class='num'>517,216.30</td><td class='num'>1,209.65</td><td class='num'>12,457.99</td></tr>
+<tr><td>11/03/2026</td><td class='num'>23,134.62</td><td class='num'>16,328.29</td><td class='num'>518,346.92</td><td class='num'>5,675.71</td><td class='num'>6,806.33</td></tr>
+<tr><td>12/03/2026</td><td class='num'>34,773.66</td><td class='num'>30,844.37</td><td class='num'>525,975.58</td><td class='num'>-3,699.37</td><td class='num'>3,929.29</td></tr>
+<tr><td>13/03/2026</td><td class='num'>16,089.15</td><td class='num'>27,912.74</td><td class='num'>529,417.73</td><td class='num'>-15,265.74</td><td class='num'>-11,823.59</td></tr>
+<tr><td>14/03/2026</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>529,417.73</td><td class='num'>0.00</td><td class='num'>0.00</td></tr>
+<tr><td>15/03/2026</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>529,417.73</td><td class='num'>0.00</td><td class='num'>0.00</td></tr>
+<tr><td>16/03/2026</td><td class='num'>34,023.64</td><td class='num'>13,874.41</td><td class='num'>541,122.37</td><td class='num'>8,444.59</td><td class='num'>20,149.23</td></tr>
+<tr><td>17/03/2026</td><td class='num'>42,962.55</td><td class='num'>22,247.07</td><td class='num'>561,894.93</td><td class='num'>-57.07</td><td class='num'>20,715.48</td></tr>
+<tr><td>18/03/2026</td><td class='num'>25,880.55</td><td class='num'>34,791.83</td><td class='num'>569,120.47</td><td class='num'>-16,136.83</td><td class='num'>-8,911.28</td></tr>
+<tr><td>19/03/2026</td><td class='num'>15,943.68</td><td class='num'>16,552.51</td><td class='num'>571,410.15</td><td class='num'>-2,898.51</td><td class='num'>-608.83</td></tr>
+<tr><td>20/03/2026</td><td class='num'>22,665.94</td><td class='num'>17,455.13</td><td class='num'>579,084.09</td><td class='num'>-2,463.13</td><td class='num'>5,210.81</td></tr>
+<tr><td>21/03/2026</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>579,084.09</td><td class='num'>0.00</td><td class='num'>0.00</td></tr>
+<tr><td>22/03/2026</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>579,084.09</td><td class='num'>0.00</td><td class='num'>0.00</td></tr>
+<tr><td>23/03/2026</td><td class='num'>34,764.61</td><td class='num'>17,251.32</td><td class='num'>595,984.70</td><td class='num'>612.68</td><td class='num'>17,513.29</td></tr>
+<tr><td>24/03/2026</td><td class='num'>47,194.00</td><td class='num'>16,914.55</td><td class='num'>620,818.70</td><td class='num'>5,445.45</td><td class='num'>30,279.45</td></tr>
+<tr><td>25/03/2026</td><td class='num'>45,887.22</td><td class='num'>28,166.56</td><td class='num'>643,023.92</td><td class='num'>-4,484.56</td><td class='num'>17,720.65</td></tr>
+<tr><td>26/03/2026</td><td class='num'>44,332.88</td><td class='num'>32,124.06</td><td class='num'>654,128.80</td><td class='num'>1,103.94</td><td class='num'>12,208.82</td></tr>
+<tr><td>27/03/2026</td><td class='num'>30,068.07</td><td class='num'>31,654.14</td><td class='num'>663,247.87</td><td class='num'>-10,705.14</td><td class='num'>-1,586.07</td></tr>
+<tr><td>28/03/2026</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>663,247.87</td><td class='num'>0.00</td><td class='num'>0.00</td></tr>
+<tr><td>29/03/2026</td><td class='num'>0.00</td><td class='num'>0.00</td><td class='num'>663,247.87</td><td class='num'>0.00</td><td class='num'>0.00</td></tr>
+<tr><td>30/03/2026</td><td class='num'>37,860.19</td><td class='num'>34,405.48</td><td class='num'>672,618.06</td><td class='num'>-5,915.48</td><td class='num'>3,454.71</td></tr>
+<tr><td>31/03/2026</td><td class='num'>24,160.27</td><td class='num'>24,928.02</td><td class='num'>678,373.33</td><td class='num'>-6,523.02</td><td class='num'>-767.75</td></tr>
             <tr>
               <td><strong>TOTAL</strong></td>
               <td class="num"><strong>665,081.58</strong></td>
               <td class="num"><strong>492,968.78</strong></td>
-              <td class="num"><strong>235,462.58</strong></td>
-              <td class="num"><strong>-63,349.78</strong></td>
+              <td class="num"><strong>678,373.33</strong></td>
+              <td class="num"><strong>-506,260.53</strong></td>
               <td class="num"><strong>172,112.80</strong></td>
             </tr>
           </tbody>
@@ -734,7 +735,7 @@ const consumo = [0.0, 13278.0, 12753.0, 19609.0, 27582.0, 13429.0, 0.0, 0.0, 103
 const salida = [0.0, 15743.19, 13337.9, 15568.29, 27964.27, 26776.17, 0.0, 0.0, 15348.12, 12780.35, 16328.29, 30844.37, 27912.74, 0.0, 0.0, 13874.41, 22247.07, 34791.83, 16552.51, 17455.13, 0.0, 0.0, 17251.32, 16914.55, 28166.56, 32124.06, 31654.14, 0.0, 0.0, 34405.48, 24928.02];
 const diferencia = [0.0, 17611.72, 8876.32, 4988.8, 4605.93, 10995.34, 0.0, 0.0, 15979.11, 11248.34, 1130.62, 7628.66, 3442.15, 0.0, 0.0, 11704.64, 20772.55, 7225.55, 2289.68, 7673.94, 0.0, 0.0, 16900.61, 24834.0, 22205.22, 11104.88, 9119.07, 0.0, 0.0, 9370.19, 5755.27];
 const acumulado = [0.0, 17611.72, 26488.05, 31476.84, 36082.77, 47078.11, 47078.11, 47078.11, 63057.22, 74305.56, 75436.17, 83064.83, 86506.98, 86506.98, 86506.98, 98211.62, 118984.18, 126209.73, 128499.4, 136173.34, 136173.34, 136173.34, 153073.95, 177907.95, 200113.17, 211218.05, 220337.12, 220337.12, 220337.12, 229707.31, 235462.58];
-const stockEntrada = [0.0, 17611.72, 26488.05, 31476.84, 36082.77, 47078.11, 47078.11, 47078.11, 63057.22, 74305.56, 75436.17, 83064.83, 86506.98, 86506.98, 86506.98, 98211.62, 118984.18, 126209.73, 128499.4, 136173.34, 136173.34, 136173.34, 153073.95, 177907.95, 200113.17, 211218.05, 220337.12, 220337.12, 220337.12, 229707.31, 235462.58];
+const stockEntrada = [442910.75, 460522.47, 469398.8, 474387.59, 478993.52, 489988.86, 489988.86, 489988.86, 505967.96, 517216.3, 518346.92, 525975.58, 529417.73, 529417.73, 529417.73, 541122.37, 561894.93, 569120.47, 571410.15, 579084.09, 579084.09, 579084.09, 595984.7, 620818.7, 643023.92, 654128.8, 663247.87, 663247.87, 663247.87, 672618.06, 678373.33];
 const merma = [0.0, -2465.19, -584.9, 4040.71, -382.27, -13347.17, 0.0, 0.0, -4954.12, 1209.65, 5675.71, -3699.37, -15265.74, 0.0, 0.0, 8444.59, -57.07, -16136.83, -2898.51, -2463.13, 0.0, 0.0, 612.68, 5445.45, -4484.56, 1103.94, -10705.14, 0.0, 0.0, -5915.48, -6523.02];
 const balance = entrada.map((v, i) => Number((v - salida[i]).toFixed(2)));
 
@@ -774,7 +775,7 @@ const chartConfigs = {
       labels: ['Stock', 'Merma', 'Salidas CAJA'],
       datasets: [{
         data: [
-          235462.58,
+          678373.33,
           0.00,
           492968.78
         ],

@@ -1,0 +1,12 @@
+﻿Metrica;Valor;Unidad
+Entradas TINA;665081,58;kg
+Salidas CAJA;492968,78;kg
+TINA procesada;429619,00;kg
+Stock inicial;442910,75;kg
+Stock de entrada;235462,58;kg
+Stock inventario cierre;678373,33;kg
+Merma;-63349,78;kg
+% Merma;-9,53;%
+Balance TINA-CAJA;172112,80;kg
+Packs entrada;2896;ud
+Packs salida;80737;ud

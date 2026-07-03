@@ -1,0 +1,7 @@
+﻿Comprobacion;Formula;Residual kg;OK
+Balance masa: Entrada = Salida + Stock entrada + Merma;665081.58 = 492968.78 + 235462.58 + -63349.78;0,00;Si
+Stock de entrada = Entradas - TINA procesada;235462.58 = 665081.58 - 429619.00;0,00;Si
+Merma = Entradas - Salidas - Stock de entrada;-63349.78 = 665081.58 - 492968.78 - 235462.58;0,00;Si
+Merma = TINA procesada - Salidas CAJA;-63349.78 = 429619.00 - 492968.78;0,00;Si
+Stock inventario = Stock inicial + Entradas - TINA procesada;678373.33 = 442910.75 + 665081.58 - 429619.00;0,00;Si
+Balance TINA-CAJA = Entradas - Salidas;172112.80 = 665081.58 - 492968.78;0,00;Si

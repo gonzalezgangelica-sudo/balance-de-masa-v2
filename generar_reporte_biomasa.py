@@ -348,36 +348,43 @@ def enrich_arrastre_mensual(
 
 
 def finalize_balance_kpis(report_data: dict[str, Any]) -> None:
-    """Merma = Entradas TINA - Salidas CAJA - Stock (inventario al cierre). Ver PREMISAS.md."""
+    """Merma = Entradas TINA - Salidas CAJA - Stock de entrada. Ver PREMISAS.md."""
     k = report_data["kpis"]
     detalle = report_data["detalle_diario"]
-    stock_ini = k.get("kg_stock_inicial")
-    if stock_ini is None:
-        stock_ini = 0.0
+    stock_ini = k.get("kg_stock_inicial") or 0.0
 
-    stock_cierre = k.get("kg_stock_final_fisico")
-    if stock_cierre is None:
-        stock_cierre = k.get("kg_stock_cierre_teorico")
-    if stock_cierre is None:
+    # Stock de entrada: kg que entran y no se procesan en el periodo (confirmado negocio).
+    k["kg_stock_entrada"] = k["kg_diferencia"]
+
+    stock_inventario = k.get("kg_stock_final_fisico")
+    if stock_inventario is None:
+        stock_inventario = k.get("kg_stock_cierre_teorico")
+    if stock_inventario is None:
         if k.get("kg_stock_final_teorico") is not None:
-            stock_cierre = k["kg_stock_final_teorico"]
+            stock_inventario = k["kg_stock_final_teorico"]
         else:
-            stock_cierre = stock_ini + k["kg_diferencia"]
-        k["kg_stock_cierre_teorico"] = stock_cierre
+            stock_inventario = stock_ini + k["kg_diferencia"]
+        k["kg_stock_cierre_teorico"] = stock_inventario
+    k["kg_stock_inventario"] = stock_inventario
+    k["kg_stock_balance"] = stock_inventario
 
-    k["kg_stock_balance"] = stock_cierre
-    k["kg_merma"] = k["kg_entrada_tina"] - k["kg_salida_no_tina"] - stock_cierre
+    k["kg_merma"] = (
+        k["kg_entrada_tina"] - k["kg_salida_no_tina"] - k["kg_stock_entrada"]
+    )
     k["pct_merma"] = (
         k["kg_merma"] / k["kg_entrada_tina"] * 100.0 if k["kg_entrada_tina"] else None
     )
 
-    acumulado = stock_ini
+    acumulado_inventario = stock_ini
     for row in detalle:
-        stock_dia = acumulado + row["diferencia_kg"]
-        delta_stock = row["diferencia_kg"]
-        row["kg_stock_balance"] = stock_dia
-        row["kg_merma"] = row["kg_entrada_tina"] - row["kg_salida_no_tina"] - delta_stock
-        acumulado = stock_dia
+        stock_entrada_dia = row["diferencia_kg"]
+        row["kg_stock_entrada"] = stock_entrada_dia
+        acumulado_inventario += stock_entrada_dia
+        row["kg_stock_inventario"] = acumulado_inventario
+        row["kg_stock_balance"] = acumulado_inventario
+        row["kg_merma"] = (
+            row["kg_entrada_tina"] - row["kg_salida_no_tina"] - stock_entrada_dia
+        )
 
 
 def resolve_dates(args: argparse.Namespace) -> tuple[dt.date, dt.date]:
@@ -480,11 +487,12 @@ def print_console_summary(start: dt.date, end: dt.date, output_path: Path, repor
     print(f"Entradas TINA (kg): {fmt_num(k['kg_entrada_tina'])}")
     print(f"TINA procesada (kg): {fmt_num(k['kg_consumo_tina'])}")
     print(f"Salidas CAJA (kg): {fmt_num(k['kg_salida_no_tina'])}")
-    print(f"Stock inventario cierre (kg): {fmt_num(k.get('kg_stock_balance', 0))}")
-    print(f"Merma (Entradas - Salidas - Stock): {fmt_num(k.get('kg_merma', 0))}")
+    print(f"Stock de entrada (kg): {fmt_num(k.get('kg_stock_entrada', 0))}")
+    print(f"Merma (Entradas - Salidas - Stock entrada): {fmt_num(k.get('kg_merma', 0))}")
     if k.get("pct_merma") is not None:
       print(f"% Merma sobre entradas: {fmt_pct(k['pct_merma'])}")
-    print(f"Diferencia (kg): {fmt_num(k['kg_diferencia'])}")
+    if k.get("kg_stock_inventario") is not None:
+      print(f"Stock inventario cierre (kg): {fmt_num(k['kg_stock_inventario'])}")
     print(f"Stock sin procesar fin de periodo (kg): {fmt_num(k['kg_stock_sin_procesar_fin'])}")
     print(f"% Diferencia: {fmt_pct(k['pct_diferencia'])}")
     print(f"Packs entrada: {k['packs_entrada']}")
@@ -578,11 +586,12 @@ PREMISA_SALIDA_REGLAS = (
   "Salida CAJA: pkpackaging <> 3 o pkpackaging NULL en dbo.proc_materials.",
 )
 PREMISA_STOCK_MERMA_REGLAS = (
-  "Stock = inventario TINA al cierre del periodo (sin procesar).",
+  "Stock de entrada: kg que entran (TINA) y no se procesan en el periodo.",
+  "Stock de entrada (kg) = Entrada TINA - TINA procesada.",
   "Merma = desperdicio del procesado; no es stock.",
-  "Balance masa: Entrada TINA = Salidas CAJA + Stock + Merma.",
-  "Merma (kg) = Entrada TINA - Salidas CAJA - Stock.",
-  "Stock cierre = stock inicial + Entradas TINA - TINA procesada (con arrastre mensual).",
+  "Balance masa: Entrada TINA = Salidas CAJA + Stock de entrada + Merma.",
+  "Merma (kg) = Entrada TINA - Salidas CAJA - Stock de entrada.",
+  "Stock inventario (arrastre): stock inicial + Entradas - TINA procesada; metrica aparte.",
 )
 
 SQL_LEGACY_ES_ENTRADA = "m.pkpackaging = 3"
@@ -1289,7 +1298,7 @@ def build_stock_merma_table_rows(detalle: list[dict[str, Any]]) -> str:
         if (
             r["kg_entrada_tina"] == 0
             and r["kg_salida_no_tina"] == 0
-            and r.get("kg_stock_balance", 0) == 0
+            and r.get("kg_stock_entrada", 0) == 0
             and r.get("kg_merma", 0) == 0
         ):
             continue
@@ -1298,7 +1307,7 @@ def build_stock_merma_table_rows(detalle: list[dict[str, Any]]) -> str:
             f"<td>{html.escape(r['fecha'])}</td>"
             f"<td class='num'>{fmt_num(r['kg_entrada_tina'])}</td>"
             f"<td class='num'>{fmt_num(r['kg_salida_no_tina'])}</td>"
-            f"<td class='num'>{fmt_num(r.get('kg_stock_balance', 0))}</td>"
+            f"<td class='num'>{fmt_num(r.get('kg_stock_entrada', 0))}</td>"
             f"<td class='num'>{fmt_num(r.get('kg_merma', 0))}</td>"
             f"<td class='num'>{fmt_num(r['balance_entrada_salida_kg'])}</td>"
             "</tr>"
@@ -1369,7 +1378,8 @@ def render_html(
     salida = [round(r["kg_salida_no_tina"], 2) for r in detalle]
     diferencia = [round(r["diferencia_kg"], 2) for r in detalle]
     acumulado = [round(r["acumulado_diferencia_kg"], 2) for r in detalle]
-    stock_entrada = [round(r.get("kg_stock_balance", 0), 2) for r in detalle]
+    stock_entrada_chart = [round(r.get("kg_stock_entrada", 0), 2) for r in detalle]
+    stock_inventario_chart = [round(r.get("kg_stock_inventario", 0), 2) for r in detalle]
     merma = [round(r.get("kg_merma", 0), 2) for r in detalle]
 
     detail_rows_html = build_table_rows(detalle)
@@ -1471,18 +1481,18 @@ def render_html(
         f"<div class='kpi-value'>{fmt_num(k['kg_stock_final_teorico'])}</div>"
         "<div class='kpi-sub'>Stock inicial + Entradas TINA - TINA procesada</div></article>"
       )
-    if k.get("kg_stock_balance") is not None:
+    if k.get("kg_stock_inventario") is not None:
       stock_cards_html += (
         f"<article class='card'><div class='kpi-title'>Stock inventario cierre (kg)</div>"
-        f"<div class='kpi-value'>{fmt_num(k['kg_stock_balance'])}</div>"
-        "<div class='kpi-sub'>Inventario TINA sin procesar al cierre</div></article>"
+        f"<div class='kpi-value'>{fmt_num(k['kg_stock_inventario'])}</div>"
+        "<div class='kpi-sub'>Con arrastre · stock inicial + entradas - procesada</div></article>"
       )
     if k.get("kg_merma") is not None:
       pct_txt = f" · {fmt_pct(k['pct_merma'])} sobre entradas" if k.get("pct_merma") is not None else ""
       stock_cards_html += (
         f"<article class='card'><div class='kpi-title'>Merma (kg)</div>"
         f"<div class='kpi-value'>{fmt_num(k['kg_merma'])}</div>"
-        f"<div class='kpi-sub'>Entradas TINA - Salidas CAJA - Stock{pct_txt}</div></article>"
+        f"<div class='kpi-sub'>Entradas - Salidas - Stock de entrada{pct_txt}</div></article>"
       )
     if k.get("arrastre_activo"):
       stock_cards_html += (
@@ -1859,9 +1869,9 @@ def render_html(
       <article class="card"><div class="kpi-title">Entradas TINA (kg)</div><div class="kpi-value">{fmt_num(k['kg_entrada_tina'])}</div><div class="kpi-sub">{k['packs_entrada']} packs</div></article>
       <article class="card"><div class="kpi-title">TINA procesada (kg)</div><div class="kpi-value">{fmt_num(k['kg_consumo_tina'])}</div><div class="kpi-sub">{k['movs_consumo']} movimientos · entrada, no CAJA</div></article>
       <article class="card"><div class="kpi-title">Salidas CAJA (kg)</div><div class="kpi-value">{fmt_num(k['kg_salida_no_tina'])}</div><div class="kpi-sub">{k['packs_salida']} packs · graders y basculas</div></article>
-      <article class="card"><div class="kpi-title">Stock inventario (kg)</div><div class="kpi-value">{fmt_num(k.get('kg_stock_balance', 0))}</div><div class="kpi-sub">Al cierre · Entrada = Salida + Stock + Merma</div></article>
-      <article class="card"><div class="kpi-title">Merma (kg)</div><div class="kpi-value">{fmt_num(k.get('kg_merma', 0))}</div><div class="kpi-sub">Entradas - Salidas - Stock · {fmt_pct(k.get('pct_merma'))}</div></article>
-      <article class="card"><div class="kpi-title">Diferencia (kg)</div><div class="kpi-value">{fmt_num(k['kg_diferencia'])}</div><div class="kpi-sub">Entradas TINA − TINA procesada · {fmt_pct(k['pct_diferencia'])}</div></article>
+      <article class="card"><div class="kpi-title">Stock de entrada (kg)</div><div class="kpi-value">{fmt_num(k.get('kg_stock_entrada', 0))}</div><div class="kpi-sub">Entradas TINA − TINA procesada · no todo se procesa</div></article>
+      <article class="card"><div class="kpi-title">Merma (kg)</div><div class="kpi-value">{fmt_num(k.get('kg_merma', 0))}</div><div class="kpi-sub">Entradas − Salidas − Stock entrada · {fmt_pct(k.get('pct_merma'))}</div></article>
+      <article class="card"><div class="kpi-title">Stock inventario (kg)</div><div class="kpi-value">{fmt_num(k.get('kg_stock_inventario', 0))}</div><div class="kpi-sub">Inventario total al cierre (con arrastre)</div></article>
       <article class="card"><div class="kpi-title">Balance TINA − CAJA (kg)</div><div class="kpi-value">{fmt_num(k['kg_balance_entrada_salida'])}</div><div class="kpi-sub">Entradas TINA − Salidas CAJA</div></article>
       <article class="card"><div class="kpi-title">Stock sin procesar fin de periodo (kg)</div><div class="kpi-value">{fmt_num(k['kg_stock_sin_procesar_fin'])}</div><div class="kpi-sub">Arrastre: Entradas TINA − TINA procesada</div></article>
       <article class="card"><div class="kpi-title">BC lotes enlazados</div><div class="kpi-value">{int(k.get('bc_lotes_enlazados', 0)):,} / {int(k.get('bc_lotes_innova', 0)):,}</div><div class="kpi-sub">{fmt_pct(k.get('bc_pct_lotes_enlazados'))} · number = Lot No.</div></article>
@@ -1958,8 +1968,8 @@ def render_html(
           </button>
         </div>
         <p class="muted" style="margin-top:0;">
-          Balance de masa: Entrada TINA = Salidas CAJA + Stock + Merma.
-          Merma (kg) = Entradas - Salidas - Stock. Stock = inventario TINA acumulado al cierre de cada dia.
+          Balance de masa: Entrada TINA = Salidas CAJA + Stock de entrada + Merma.
+          Stock de entrada = Entradas − TINA procesada (kg que entran y no se procesan).
         </p>
         <table id="stockMermaTable">
           <thead>
@@ -1967,7 +1977,7 @@ def render_html(
               <th>Fecha</th>
               <th class="num">Entradas (kg)</th>
               <th class="num">Salidas (kg)</th>
-              <th class="num">Stock (kg)</th>
+              <th class="num">Stock entrada (kg)</th>
               <th class="num">Merma (kg)</th>
               <th class="num">Balance E-S (kg)</th>
             </tr>
@@ -1978,7 +1988,7 @@ def render_html(
               <td><strong>TOTAL</strong></td>
               <td class="num"><strong>{fmt_num(k['kg_entrada_tina'])}</strong></td>
               <td class="num"><strong>{fmt_num(k['kg_salida_no_tina'])}</strong></td>
-              <td class="num"><strong>{fmt_num(k.get('kg_stock_balance', 0))}</strong></td>
+              <td class="num"><strong>{fmt_num(k.get('kg_stock_entrada', 0))}</strong></td>
               <td class="num"><strong>{fmt_num(k.get('kg_merma', 0))}</strong></td>
               <td class="num"><strong>{fmt_num(k['kg_balance_entrada_salida'])}</strong></td>
             </tr>
@@ -2034,7 +2044,7 @@ const consumo = {json.dumps(consumo)};
 const salida = {json.dumps(salida)};
 const diferencia = {json.dumps(diferencia)};
 const acumulado = {json.dumps(acumulado)};
-const stockEntrada = {json.dumps(stock_entrada)};
+const stockEntrada = {json.dumps(stock_entrada_chart)};
 const merma = {json.dumps(merma)};
 const balance = entrada.map((v, i) => Number((v - salida[i]).toFixed(2)));
 
@@ -2071,10 +2081,10 @@ const chartConfigs = {{
   donutTotals: {{
     type: 'doughnut',
     data: {{
-      labels: ['Stock', 'Merma', 'Salidas CAJA'],
+      labels: ['Stock entrada', 'Merma', 'Salidas CAJA'],
       datasets: [{{
         data: [
-          {k.get('kg_stock_balance', 0):.2f},
+          {k.get('kg_stock_entrada', 0):.2f},
           {max(k.get('kg_merma', 0), 0):.2f},
           {k['kg_salida_no_tina']:.2f}
         ],
@@ -2088,7 +2098,7 @@ const chartConfigs = {{
     data: {{
       labels,
       datasets: [
-        {{ label: 'Stock inventario', data: stockEntrada, borderColor: '#0b6e4f', tension: 0.25, fill: false }},
+        {{ label: 'Stock de entrada', data: stockEntrada, borderColor: '#0b6e4f', tension: 0.25, fill: false }},
         {{ label: 'Merma (balance)', data: merma, borderColor: '#f59e0b', tension: 0.25, fill: false }}
       ]
     }},

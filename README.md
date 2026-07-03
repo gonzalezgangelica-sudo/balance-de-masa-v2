@@ -371,6 +371,9 @@ python generar_reporte_biomasa.py --start 01/04/2026 --end 30/04/2026 --stock-in
 # Arrastre mensual (stock inicial = cierre mes anterior, desde enero con stock 0)
 python generar_reporte_biomasa.py --start 01/03/2026 --end 31/03/2026 --arrastre-mensual --skip-bc
 
+# Contraste mensual (CSVs + CONTRASTE.md) — validar marzo antes de otros meses
+python exportar_contraste_mes.py --start 01/03/2026 --end 31/03/2026 --arrastre-mensual --skip-bc
+
 # Validación diaria salidas ↔ BC
 python validar_dia_salidas.py --fecha 04/03/2026 --max-detalle 30
 
@@ -488,6 +491,7 @@ Al cambiar reglas o maestros de materiales:
 ```
 CALCULO_BIOMASA/
 ├── generar_reporte_biomasa.py   # Lógica principal, HTML, BC, premisas SQL
+├── exportar_contraste_mes.py    # Export CSV + CONTRASTE.md (mes de referencia)
 ├── validar_dia_salidas.py       # Validación diaria salidas ↔ BC por lote
 ├── generar_documento_funcional.py
 ├── PREMISAS.md                  # Reglas de negocio (canónico)
