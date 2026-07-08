@@ -512,6 +512,15 @@ def print_console_summary(start: dt.date, end: dt.date, output_path: Path, repor
       )
       print(f"BC con pedido (ud. / kg): {fmt_num(k.get('bc_qty_con_pedido', 0))} / {fmt_num(k.get('bc_kg_con_pedido', 0))}")
       print(f"BC sin pedido (ud. / kg): {fmt_num(k.get('bc_qty_sin_pedido', 0))} / {fmt_num(k.get('bc_kg_sin_pedido', 0))}")
+    if k.get("bc_bal_kg_stock_inicial") is not None:
+      print(
+          f"Balance BC E/G — Stock inicial: {fmt_num(k['bc_bal_kg_stock_inicial'])} | "
+          f"Salidas Innova: {fmt_num(k['bc_bal_kg_produccion'])} | "
+          f"Ventas: {fmt_num(k['bc_bal_kg_ventas'])} | "
+          f"Stock teorico: {fmt_num(k['bc_bal_kg_stock_teorico'])} | "
+          f"Stock real: {fmt_num(k['bc_bal_kg_stock_real'])} | "
+          f"Check: {fmt_num(k['bc_bal_kg_check'])} kg"
+      )
     if k.get("kg_stock_inicial") is not None:
       origen = " (arrastre mensual)" if k.get("kg_stock_inicial_auto") else ""
       print(f"Stock inicial (kg){origen}: {fmt_num(k['kg_stock_inicial'])}")
@@ -554,6 +563,14 @@ def enrich_stock_validation(
     if stock_final_fisico is not None:
       # Positivo = faltante/merma a justificar, negativo = sobrante.
       k["kg_ajuste_conciliacion"] = stock_teorico - stock_final_fisico
+
+
+def sql_row_date_key(value: Any) -> str:
+    if isinstance(value, dt.datetime):
+        return value.date().isoformat()
+    if isinstance(value, dt.date):
+        return value.isoformat()
+    return str(value)
 
 
 def fetch_rows(cursor: pymssql.Cursor, query: str, params: tuple[Any, ...]) -> list[dict[str, Any]]:
@@ -619,7 +636,25 @@ PREMISA_BC_PEDIDO_REGLAS = (
 SQL_BC_SALIDA_CON_PEDIDO = "NULLIF(LTRIM(RTRIM(sl.[Order No.])), '') IS NOT NULL"
 SQL_BC_SALIDA_SIN_PEDIDO = "NULLIF(LTRIM(RTRIM(sl.[Order No.])), '') IS NULL"
 SQL_BC_ILE_SALE = "ile.[Entry Type] = 1"
+SQL_BC_LOCATION_EG = "ile.[Location Code] IN ('E', 'G')"
+SQL_BC_ILE_OUTPUT = "ile.[Entry Type] = 4"
 SQL_INNOVA_LOT = "CAST(p.number AS varchar(50))"
+BC_BALANCE_CHECK_TOLERANCE_KG = 5000.0
+PREMISA_BC_BALANCE_EG_REGLAS = (
+  "Almacenes BC: Location Code E y G unicamente.",
+  "Fecha empaque: campo [Fecha empaque] en Item Ledger Entry.",
+  "Stock inicial (dia): ventas del dia con [Fecha empaque] anterior al dia de venta (acumulable).",
+  "Salidas Innova: salidas CAJA del periodo (proc_packs prday, premisa 3).",
+  "Ventas BC: ventas del periodo en almacenes E/G (Posting Date, Entry Type=1).",
+  "Stock real (dia): empaque del periodo hasta ese dia sin venta hasta ese dia (kg BC por lote).",
+  "Stock teorico (dia): Stock inicial + Salidas Innova - Ventas del dia (flujo diario).",
+  "Stock teorico (cierre): Stock apertura + Salidas Innova acumuladas - Ventas acumuladas.",
+  "Stock apertura: empaque anterior al periodo sin venta antes del periodo (E/G).",
+  "Diferencia (dia): Stock teorico cierre - Stock real cierre.",
+  "Check mes: Stock teorico cierre fin de mes - Stock real fin de mes.",
+  "Fines de semana: sin Salidas Innova ni Ventas BC (0 kg); si hay stock de inicio y stock final del dia (cierre teorico y real, arrastrado si no hay movimiento).",
+  "Desglose por tipo de producto (Innova material/nombre) y lote (BC Lot No. / Innova number).",
+)
 
 # Limitacion conocida — debe mostrarse en todos los resultados (ver PREMISAS.md).
 NOTA_ALERTA_VAP = (
@@ -681,6 +716,7 @@ def build_report_intro_html(
         "<li><strong>Detalle diario</strong> — tabla día a día con exportación Excel.</li>"
         "<li><strong>Balance</strong> — stock de tinas, merma y arrastre mensual.</li>"
         "<li><strong>Cruce BC</strong> — enlace Innova / Business Central por lote.</li>"
+        "<li><strong>Balance BC E/G</strong> — stock inicial, salidas Innova, ventas y check teorico (almacenes E y G).</li>"
         "<li><strong>Materiales</strong> — top entradas y salidas.</li>"
         "</ol>"
         "<p class='intro-debug-note muted'>"
@@ -763,6 +799,46 @@ def fetch_innova_salidas_lotes(
     ORDER BY fecha, lot;
     """
     return fetch_rows(cursor, query, params)
+
+
+def fetch_innova_lotes_por_material(
+    conn: pymssql.Connection,
+    start: dt.date,
+    end: dt.date,
+) -> list[dict[str, Any]]:
+    cursor = conn.cursor()
+    params = (start.isoformat(), end.isoformat())
+    query = f"""
+    SELECT
+      {SQL_INNOVA_LOT} AS lot,
+      m.material,
+      m.name AS material_nombre,
+      MIN(CAST(p.prday AS date)) AS prday_min,
+      MAX(CAST(p.prday AS date)) AS prday_max,
+      SUM(CAST(p.weight AS float)) AS kg_innova,
+      COUNT(*) AS packs
+    FROM dbo.proc_packs p
+    JOIN dbo.proc_materials m ON m.material = p.material
+    WHERE p.prday >= %s
+      AND p.prday < DATEADD(day, 1, %s)
+      AND {SQL_SALIDA_CAJA}
+      AND NULLIF(LTRIM(RTRIM({SQL_INNOVA_LOT})), '') IS NOT NULL
+    GROUP BY {SQL_INNOVA_LOT}, m.material, m.name
+    ORDER BY lot;
+    """
+    rows = fetch_rows(cursor, query, params)
+    return [
+        {
+            "lot": str(row["lot"]).strip(),
+            "material": str(row.get("material") or "").strip(),
+            "material_nombre": str(row.get("material_nombre") or "").strip(),
+            "prday_min": row.get("prday_min"),
+            "prday_max": row.get("prday_max"),
+            "kg_innova": to_float(row.get("kg_innova")),
+            "packs": int(row.get("packs") or 0),
+        }
+        for row in rows
+    ]
 
 
 def fetch_bc_salidas_pedido(
@@ -882,6 +958,624 @@ def fetch_bc_salidas_pedido(
             ],
         },
     }
+
+
+def previous_month_range(period_start: dt.date) -> tuple[dt.date, dt.date]:
+    first_current = period_start.replace(day=1)
+    last_previous = first_current - dt.timedelta(days=1)
+    first_previous = last_previous.replace(day=1)
+    return first_previous, last_previous
+
+
+def fetch_bc_balance_eg(
+    conn: pymssql.Connection,
+    start: dt.date,
+    end: dt.date,
+) -> dict[str, Any]:
+    cursor = conn.cursor()
+    params_period = (start.isoformat(), end.isoformat())
+    params_unsold = (start.isoformat(), end.isoformat(), start.isoformat(), end.isoformat())
+    params_lot_snapshot = (
+        start.isoformat(),
+        end.isoformat(),
+        start.isoformat(),
+        end.isoformat(),
+    )
+
+    q_ventas_diario = f"""
+    SELECT
+      CAST(ile.[Posting Date] AS date) AS fecha,
+      SUM(ABS(CAST(ile.[Kilos] AS float))) AS kg,
+      COUNT(DISTINCT ile.[Lot No.]) AS lotes
+    FROM bc.[Item Ledger Entry] ile
+    WHERE ile.[Posting Date] >= %s
+      AND ile.[Posting Date] < DATEADD(day, 1, %s)
+      AND {SQL_BC_ILE_SALE}
+      AND {SQL_BC_LOCATION_EG}
+    GROUP BY CAST(ile.[Posting Date] AS date)
+    ORDER BY fecha;
+    """
+    ventas_diario = fetch_rows(cursor, q_ventas_diario, params_period)
+
+    q_stock_inicial_diario = f"""
+    SELECT
+      CAST(ile.[Posting Date] AS date) AS fecha,
+      SUM(ABS(CAST(ile.[Kilos] AS float))) AS kg,
+      COUNT(DISTINCT ile.[Lot No.]) AS lotes
+    FROM bc.[Item Ledger Entry] ile
+    WHERE ile.[Posting Date] >= %s
+      AND ile.[Posting Date] < DATEADD(day, 1, %s)
+      AND {SQL_BC_ILE_SALE}
+      AND {SQL_BC_LOCATION_EG}
+      AND ile.[Fecha empaque] IS NOT NULL
+      AND CAST(ile.[Fecha empaque] AS date) < CAST(ile.[Posting Date] AS date)
+    GROUP BY CAST(ile.[Posting Date] AS date)
+    ORDER BY fecha;
+    """
+    stock_inicial_diario = fetch_rows(cursor, q_stock_inicial_diario, params_period)
+
+    q_stock_inicial_total = f"""
+    SELECT
+      SUM(ABS(CAST(ile.[Kilos] AS float))) AS kg,
+      COUNT(DISTINCT ile.[Lot No.]) AS lotes
+    FROM bc.[Item Ledger Entry] ile
+    WHERE ile.[Posting Date] >= %s
+      AND ile.[Posting Date] < DATEADD(day, 1, %s)
+      AND {SQL_BC_ILE_SALE}
+      AND {SQL_BC_LOCATION_EG}
+      AND ile.[Fecha empaque] IS NOT NULL
+      AND CAST(ile.[Fecha empaque] AS date) < CAST(ile.[Posting Date] AS date);
+    """
+    stock_inicial_total = fetch_rows(cursor, q_stock_inicial_total, params_period)[0]
+
+    q_stock_apertura = f"""
+    WITH lot_pre AS (
+      SELECT
+        CAST(ile.[Lot No.] AS varchar(50)) AS lot,
+        MAX(ABS(CAST(ile.[Kilos] AS float))) AS kg
+      FROM bc.[Item Ledger Entry] ile
+      WHERE ile.[Fecha empaque] < %s
+        AND {SQL_BC_LOCATION_EG}
+        AND NULLIF(LTRIM(RTRIM(ile.[Lot No.])), '') IS NOT NULL
+      GROUP BY CAST(ile.[Lot No.] AS varchar(50))
+    ),
+    sold_before AS (
+      SELECT DISTINCT CAST(ile.[Lot No.] AS varchar(50)) AS lot
+      FROM bc.[Item Ledger Entry] ile
+      WHERE ile.[Posting Date] < %s
+        AND {SQL_BC_ILE_SALE}
+        AND {SQL_BC_LOCATION_EG}
+        AND NULLIF(LTRIM(RTRIM(ile.[Lot No.])), '') IS NOT NULL
+    )
+    SELECT
+      COALESCE(SUM(l.kg), 0) AS kg,
+      COUNT(*) AS lotes
+    FROM lot_pre l
+    WHERE l.lot NOT IN (SELECT lot FROM sold_before);
+    """
+    stock_apertura = fetch_rows(cursor, q_stock_apertura, (start.isoformat(), start.isoformat()))[0]
+
+    q_lotes_apertura = f"""
+    WITH lot_pre AS (
+      SELECT
+        CAST(ile.[Lot No.] AS varchar(50)) AS lot,
+        MIN(CAST(ile.[Fecha empaque] AS date)) AS fe_empaque,
+        MAX(ABS(CAST(ile.[Kilos] AS float))) AS kg,
+        MAX(NULLIF(LTRIM(RTRIM(CAST(ile.[Item No.] AS varchar(50)))), '')) AS item_no,
+        MAX(NULLIF(LTRIM(RTRIM(CAST(ile.[Description] AS varchar(250)))), '')) AS item_description
+      FROM bc.[Item Ledger Entry] ile
+      WHERE ile.[Fecha empaque] < %s
+        AND {SQL_BC_LOCATION_EG}
+        AND NULLIF(LTRIM(RTRIM(ile.[Lot No.])), '') IS NOT NULL
+      GROUP BY CAST(ile.[Lot No.] AS varchar(50))
+    ),
+    sold_before AS (
+      SELECT DISTINCT CAST(ile.[Lot No.] AS varchar(50)) AS lot
+      FROM bc.[Item Ledger Entry] ile
+      WHERE ile.[Posting Date] < %s
+        AND {SQL_BC_ILE_SALE}
+        AND {SQL_BC_LOCATION_EG}
+        AND NULLIF(LTRIM(RTRIM(ile.[Lot No.])), '') IS NOT NULL
+    )
+    SELECT
+      l.lot,
+      l.fe_empaque,
+      l.kg,
+      l.item_no,
+      l.item_description
+    FROM lot_pre l
+    WHERE l.lot NOT IN (SELECT lot FROM sold_before)
+    ORDER BY l.lot;
+    """
+    lotes_apertura_raw = fetch_rows(
+        cursor, q_lotes_apertura, (start.isoformat(), start.isoformat())
+    )
+    lotes_apertura = [
+        {
+            "lot": str(row["lot"]).strip(),
+            "fe_empaque": row.get("fe_empaque"),
+            "kg": to_float(row.get("kg")),
+            "item_no": str(row.get("item_no") or "").strip(),
+            "item_description": str(row.get("item_description") or "").strip(),
+        }
+        for row in lotes_apertura_raw
+    ]
+
+    q_ventas_por_lote = f"""
+    SELECT
+      CAST(ile.[Lot No.] AS varchar(50)) AS lot,
+      SUM(ABS(CAST(ile.[Kilos] AS float))) AS kg,
+      MAX(NULLIF(LTRIM(RTRIM(CAST(ile.[Item No.] AS varchar(50)))), '')) AS item_no,
+      MAX(NULLIF(LTRIM(RTRIM(CAST(ile.[Description] AS varchar(250)))), '')) AS item_description,
+      MIN(CAST(ile.[Posting Date] AS date)) AS first_sale,
+      MAX(CAST(ile.[Posting Date] AS date)) AS last_sale
+    FROM bc.[Item Ledger Entry] ile
+    WHERE ile.[Posting Date] >= %s
+      AND ile.[Posting Date] < DATEADD(day, 1, %s)
+      AND {SQL_BC_ILE_SALE}
+      AND {SQL_BC_LOCATION_EG}
+      AND NULLIF(LTRIM(RTRIM(ile.[Lot No.])), '') IS NOT NULL
+    GROUP BY CAST(ile.[Lot No.] AS varchar(50))
+    ORDER BY lot;
+    """
+    ventas_por_lote_raw = fetch_rows(cursor, q_ventas_por_lote, params_period)
+    ventas_por_lote = [
+        {
+            "lot": str(row["lot"]).strip(),
+            "kg": to_float(row.get("kg")),
+            "item_no": str(row.get("item_no") or "").strip(),
+            "item_description": str(row.get("item_description") or "").strip(),
+            "first_sale": row.get("first_sale"),
+            "last_sale": row.get("last_sale"),
+        }
+        for row in ventas_por_lote_raw
+    ]
+
+    q_ventas_total = f"""
+    SELECT
+      SUM(ABS(CAST(ile.[Kilos] AS float))) AS kg,
+      COUNT(DISTINCT ile.[Lot No.]) AS lotes
+    FROM bc.[Item Ledger Entry] ile
+    WHERE ile.[Posting Date] >= %s
+      AND ile.[Posting Date] < DATEADD(day, 1, %s)
+      AND {SQL_BC_ILE_SALE}
+      AND {SQL_BC_LOCATION_EG};
+    """
+    ventas_total = fetch_rows(cursor, q_ventas_total, params_period)[0]
+
+    q_unsold_lots = f"""
+    WITH mar_venta AS (
+      SELECT DISTINCT CAST(ile.[Lot No.] AS varchar(50)) AS lot
+      FROM bc.[Item Ledger Entry] ile
+      WHERE ile.[Posting Date] >= %s
+        AND ile.[Posting Date] < DATEADD(day, 1, %s)
+        AND {SQL_BC_ILE_SALE}
+        AND {SQL_BC_LOCATION_EG}
+        AND NULLIF(LTRIM(RTRIM(ile.[Lot No.])), '') IS NOT NULL
+    )
+    SELECT DISTINCT CAST(ile.[Lot No.] AS varchar(50)) AS lot
+    FROM bc.[Item Ledger Entry] ile
+    WHERE ile.[Fecha empaque] >= %s
+      AND ile.[Fecha empaque] < DATEADD(day, 1, %s)
+      AND {SQL_BC_LOCATION_EG}
+      AND NULLIF(LTRIM(RTRIM(ile.[Lot No.])), '') IS NOT NULL
+      AND CAST(ile.[Lot No.] AS varchar(50)) NOT IN (SELECT lot FROM mar_venta)
+    ORDER BY lot;
+    """
+    unsold_rows = fetch_rows(cursor, q_unsold_lots, params_unsold)
+    unsold_lots = [str(row["lot"]).strip() for row in unsold_rows]
+
+    q_stock_final_total = f"""
+    WITH mar_venta AS (
+      SELECT DISTINCT CAST(ile.[Lot No.] AS varchar(50)) AS lot
+      FROM bc.[Item Ledger Entry] ile
+      WHERE ile.[Posting Date] >= %s
+        AND ile.[Posting Date] < DATEADD(day, 1, %s)
+        AND {SQL_BC_ILE_SALE}
+        AND {SQL_BC_LOCATION_EG}
+        AND NULLIF(LTRIM(RTRIM(ile.[Lot No.])), '') IS NOT NULL
+    ),
+    stock_final_lot AS (
+      SELECT
+        CAST(ile.[Lot No.] AS varchar(50)) AS lot,
+        MAX(ABS(CAST(ile.[Kilos] AS float))) AS kg
+      FROM bc.[Item Ledger Entry] ile
+      WHERE ile.[Fecha empaque] >= %s
+        AND ile.[Fecha empaque] < DATEADD(day, 1, %s)
+        AND {SQL_BC_LOCATION_EG}
+        AND NULLIF(LTRIM(RTRIM(ile.[Lot No.])), '') IS NOT NULL
+        AND CAST(ile.[Lot No.] AS varchar(50)) NOT IN (SELECT lot FROM mar_venta)
+      GROUP BY CAST(ile.[Lot No.] AS varchar(50))
+    )
+    SELECT
+      COALESCE(SUM(kg), 0) AS kg,
+      COUNT(*) AS lotes
+    FROM stock_final_lot;
+    """
+    stock_final_total = fetch_rows(cursor, q_stock_final_total, params_unsold)[0]
+
+    q_lot_snapshot = f"""
+    WITH lot_empaque AS (
+      SELECT
+        CAST(ile.[Lot No.] AS varchar(50)) AS lot,
+        MIN(CAST(ile.[Fecha empaque] AS date)) AS fe_empaque,
+        MAX(ABS(CAST(ile.[Kilos] AS float))) AS kg,
+        MAX(NULLIF(LTRIM(RTRIM(CAST(ile.[Item No.] AS varchar(50)))), '')) AS item_no,
+        MAX(NULLIF(LTRIM(RTRIM(CAST(ile.[Description] AS varchar(250)))), '')) AS item_description
+      FROM bc.[Item Ledger Entry] ile
+      WHERE ile.[Fecha empaque] >= %s
+        AND ile.[Fecha empaque] < DATEADD(day, 1, %s)
+        AND {SQL_BC_LOCATION_EG}
+        AND NULLIF(LTRIM(RTRIM(ile.[Lot No.])), '') IS NOT NULL
+      GROUP BY CAST(ile.[Lot No.] AS varchar(50))
+    ),
+    lot_first_sale AS (
+      SELECT
+        CAST(ile.[Lot No.] AS varchar(50)) AS lot,
+        MIN(CAST(ile.[Posting Date] AS date)) AS first_sale
+      FROM bc.[Item Ledger Entry] ile
+      WHERE ile.[Posting Date] >= %s
+        AND ile.[Posting Date] < DATEADD(day, 1, %s)
+        AND {SQL_BC_ILE_SALE}
+        AND {SQL_BC_LOCATION_EG}
+        AND NULLIF(LTRIM(RTRIM(ile.[Lot No.])), '') IS NOT NULL
+      GROUP BY CAST(ile.[Lot No.] AS varchar(50))
+    )
+    SELECT
+      e.lot,
+      e.fe_empaque,
+      e.kg,
+      e.item_no,
+      e.item_description,
+      s.first_sale
+    FROM lot_empaque e
+    LEFT JOIN lot_first_sale s ON s.lot = e.lot
+    ORDER BY e.lot;
+    """
+    lot_snapshot_raw = fetch_rows(cursor, q_lot_snapshot, params_lot_snapshot)
+    lot_snapshot = [
+        {
+            "lot": str(row["lot"]).strip(),
+            "fe_empaque": row["fe_empaque"],
+            "kg": to_float(row["kg"]),
+            "item_no": str(row.get("item_no") or "").strip(),
+            "item_description": str(row.get("item_description") or "").strip(),
+            "first_sale": row.get("first_sale"),
+        }
+        for row in lot_snapshot_raw
+    ]
+
+    q_empaque_mes = f"""
+    SELECT COUNT(DISTINCT ile.[Lot No.]) AS lotes
+    FROM bc.[Item Ledger Entry] ile
+    WHERE ile.[Fecha empaque] >= %s
+      AND ile.[Fecha empaque] < DATEADD(day, 1, %s)
+      AND {SQL_BC_LOCATION_EG}
+      AND NULLIF(LTRIM(RTRIM(ile.[Lot No.])), '') IS NOT NULL;
+    """
+    empaque_mes = fetch_rows(cursor, q_empaque_mes, params_period)[0]
+
+    return {
+        "ventas_diario": ventas_diario,
+        "stock_inicial_diario": stock_inicial_diario,
+        "lot_snapshot": lot_snapshot,
+        "lotes_apertura": lotes_apertura,
+        "ventas_por_lote": ventas_por_lote,
+        "kg_stock_inicial": to_float(stock_inicial_total.get("kg")),
+        "lotes_stock_inicial": int(stock_inicial_total.get("lotes") or 0),
+        "kg_stock_apertura": to_float(stock_apertura.get("kg")),
+        "lotes_stock_apertura": int(stock_apertura.get("lotes") or 0),
+        "kg_ventas": to_float(ventas_total.get("kg")),
+        "lotes_ventas": int(ventas_total.get("lotes") or 0),
+        "unsold_lots": unsold_lots,
+        "lotes_empaque_mes": int(empaque_mes.get("lotes") or 0),
+        "lotes_stock_final": len(unsold_lots),
+        "lotes_stock_final_bc": int(stock_final_total.get("lotes") or 0),
+        "kg_stock_final": to_float(stock_final_total.get("kg")),
+        "sql_trace": {
+            "view_or_tables": ["bc.[Item Ledger Entry]"],
+            "params": {
+                "start": start.isoformat(),
+                "end": end.isoformat(),
+            },
+            "queries": [
+                {"name": "bc_balance_ventas_diario_eg", "query": q_ventas_diario.strip()},
+                {"name": "bc_balance_stock_inicial_diario_eg", "query": q_stock_inicial_diario.strip()},
+                {"name": "bc_balance_stock_apertura_eg", "query": q_stock_apertura.strip()},
+                {"name": "bc_balance_lotes_apertura_eg", "query": q_lotes_apertura.strip()},
+                {"name": "bc_balance_ventas_por_lote_eg", "query": q_ventas_por_lote.strip()},
+                {"name": "bc_balance_lot_snapshot_eg", "query": q_lot_snapshot.strip()},
+                {"name": "bc_balance_unsold_lots_eg", "query": q_unsold_lots.strip()},
+                {"name": "bc_balance_stock_final_eg", "query": q_stock_final_total.strip()},
+            ],
+        },
+    }
+
+
+def parse_fecha_es_date(fecha: str) -> dt.date:
+    return dt.datetime.strptime(fecha, "%d/%m/%Y").date()
+
+
+def compute_bc_stock_real_cierre(
+    lot_snapshot: list[dict[str, Any]],
+    day: dt.date,
+) -> float:
+    total = 0.0
+    for row in lot_snapshot:
+        fe_empaque = row.get("fe_empaque")
+        if fe_empaque is None:
+            continue
+        if isinstance(fe_empaque, dt.datetime):
+            fe_empaque = fe_empaque.date()
+        if fe_empaque > day:
+            continue
+        first_sale = row.get("first_sale")
+        if first_sale is not None:
+            if isinstance(first_sale, dt.datetime):
+                first_sale = first_sale.date()
+            if first_sale <= day:
+                continue
+        total += to_float(row.get("kg"))
+    return total
+
+
+def _format_sql_date(value: Any) -> str:
+    if value is None:
+        return "—"
+    if isinstance(value, dt.datetime):
+        return value.strftime("%d/%m/%Y")
+    if isinstance(value, dt.date):
+        return value.strftime("%d/%m/%Y")
+    return str(value)
+
+
+def _tipo_slug(tipo_key: str) -> str:
+    slug = "".join(ch if ch.isalnum() else "-" for ch in tipo_key.strip().lower())
+    slug = "-".join(part for part in slug.split("-") if part)
+    return slug or "sin-tipo"
+
+
+def build_bc_balance_lot_detalle(
+    bc_balance: dict[str, Any],
+    innova_lotes_material: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    innova_by_lot: dict[str, dict[str, Any]] = {}
+    for row in innova_lotes_material or []:
+        lot_key = str(row["lot"]).strip()
+        existing = innova_by_lot.get(lot_key)
+        if existing is None:
+            innova_by_lot[lot_key] = dict(row)
+            continue
+        existing["kg_innova"] = to_float(existing.get("kg_innova")) + to_float(row.get("kg_innova"))
+        existing["packs"] = int(existing.get("packs") or 0) + int(row.get("packs") or 0)
+
+    unsold = {str(lot).strip() for lot in (bc_balance.get("unsold_lots") or [])}
+    ventas_by_lot = {
+        str(row["lot"]).strip(): row for row in (bc_balance.get("ventas_por_lote") or [])
+    }
+    apertura_by_lot = {
+        str(row["lot"]).strip(): row for row in (bc_balance.get("lotes_apertura") or [])
+    }
+    snapshot_by_lot = {
+        str(row["lot"]).strip(): row for row in (bc_balance.get("lot_snapshot") or [])
+    }
+
+    all_lots: set[str] = set()
+    all_lots.update(innova_by_lot)
+    all_lots.update(unsold)
+    all_lots.update(ventas_by_lot)
+    all_lots.update(apertura_by_lot)
+    all_lots.update(snapshot_by_lot)
+
+    detalle: list[dict[str, Any]] = []
+    for lot in sorted(all_lots):
+        snap = snapshot_by_lot.get(lot, {})
+        apertura = apertura_by_lot.get(lot)
+        innova = innova_by_lot.get(lot, {})
+        venta = ventas_by_lot.get(lot, {})
+
+        material = str(innova.get("material") or "").strip()
+        material_nombre = str(innova.get("material_nombre") or "").strip()
+        item_no = (
+            str(snap.get("item_no") or "").strip()
+            or str(apertura.get("item_no") if apertura else "").strip()
+            or str(venta.get("item_no") or "").strip()
+        )
+        item_description = (
+            str(snap.get("item_description") or "").strip()
+            or str(apertura.get("item_description") if apertura else "").strip()
+            or str(venta.get("item_description") or "").strip()
+        )
+        tipo_key = material or item_no or "(sin tipo)"
+        tipo_nombre = material_nombre or item_description or item_no or "(sin tipo)"
+
+        fe_empaque = snap.get("fe_empaque") or (apertura.get("fe_empaque") if apertura else None)
+        kg_bc = to_float(snap.get("kg")) if snap else to_float(apertura.get("kg") if apertura else 0)
+        kg_innova = to_float(innova.get("kg_innova"))
+        kg_ventas_bc = to_float(venta.get("kg"))
+        packs_innova = int(innova.get("packs") or 0)
+        first_sale = snap.get("first_sale") or venta.get("first_sale")
+
+        if lot in unsold:
+            estado = "stock_final"
+        elif kg_ventas_bc > 0 or first_sale is not None:
+            estado = "vendido"
+        elif apertura:
+            estado = "apertura"
+        else:
+            estado = "empaque_mes"
+
+        detalle.append(
+            {
+                "lot": lot,
+                "tipo_key": tipo_key,
+                "tipo_nombre": tipo_nombre,
+                "material": material,
+                "material_nombre": material_nombre,
+                "item_no": item_no,
+                "item_description": item_description,
+                "fe_empaque": fe_empaque,
+                "prday_min": innova.get("prday_min"),
+                "prday_max": innova.get("prday_max"),
+                "kg_innova": kg_innova,
+                "packs_innova": packs_innova,
+                "kg_bc": kg_bc,
+                "kg_ventas_bc": kg_ventas_bc,
+                "kg_stock_final": kg_bc if lot in unsold else 0.0,
+                "first_sale": first_sale,
+                "last_sale": venta.get("last_sale"),
+                "estado": estado,
+                "enlazado": bool(innova) and bool(snap or apertura or venta),
+            }
+        )
+    return detalle
+
+
+def build_bc_balance_por_tipo(lot_detalle: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    grouped: dict[str, dict[str, Any]] = {}
+    for row in lot_detalle:
+        key = row["tipo_key"]
+        bucket = grouped.setdefault(
+            key,
+            {
+                "tipo_key": key,
+                "tipo_nombre": row["tipo_nombre"],
+                "material": row.get("material") or "",
+                "item_no": row.get("item_no") or "",
+                "lotes": 0,
+                "lotes_stock_final": 0,
+                "lotes_vendidos": 0,
+                "kg_innova": 0.0,
+                "kg_bc": 0.0,
+                "kg_ventas_bc": 0.0,
+                "kg_stock_final": 0.0,
+                "packs_innova": 0,
+                "lotes_detalle": [],
+            },
+        )
+        bucket["lotes"] += 1
+        bucket["kg_innova"] += to_float(row.get("kg_innova"))
+        bucket["kg_bc"] += to_float(row.get("kg_bc"))
+        bucket["kg_ventas_bc"] += to_float(row.get("kg_ventas_bc"))
+        bucket["kg_stock_final"] += to_float(row.get("kg_stock_final"))
+        bucket["packs_innova"] += int(row.get("packs_innova") or 0)
+        if row.get("estado") == "stock_final":
+            bucket["lotes_stock_final"] += 1
+        if row.get("estado") == "vendido":
+            bucket["lotes_vendidos"] += 1
+        bucket["lotes_detalle"].append(row)
+
+    result = list(grouped.values())
+    result.sort(key=lambda item: (-item["kg_innova"], item["tipo_nombre"]))
+    return result
+
+
+def attach_bc_balance_eg_to_report(
+    report_data: dict[str, Any],
+    bc_balance: dict[str, Any],
+    innova_lotes: list[dict[str, Any]] | None = None,
+    innova_lotes_material: list[dict[str, Any]] | None = None,
+) -> None:
+    _ = innova_lotes
+
+    kg_stock_inicial = bc_balance["kg_stock_inicial"]
+    kg_stock_apertura = bc_balance["kg_stock_apertura"]
+    kg_ventas = bc_balance["kg_ventas"]
+    kg_produccion = to_float(report_data["kpis"]["kg_salida_no_tina"])
+
+    ventas_by_date = {
+        sql_row_date_key(row["fecha"]): to_float(row["kg"]) for row in bc_balance["ventas_diario"]
+    }
+    stock_ini_by_date = {
+        sql_row_date_key(row["fecha"]): to_float(row["kg"]) for row in bc_balance["stock_inicial_diario"]
+    }
+    lot_snapshot = bc_balance.get("lot_snapshot") or []
+
+    detalle_bc: list[dict[str, Any]] = []
+    kg_salidas_acum = 0.0
+    kg_ventas_acum = 0.0
+    for det in report_data["detalle_diario"]:
+        date_key = parse_fecha_es(det["fecha"])
+        day = parse_fecha_es_date(det["fecha"])
+        kg_stock_ini_dia = stock_ini_by_date.get(date_key, 0.0)
+        kg_ventas_dia = ventas_by_date.get(date_key, 0.0)
+        kg_prod_dia = to_float(det["kg_salida_no_tina"])
+        kg_stock_teorico_dia = kg_stock_ini_dia + kg_prod_dia - kg_ventas_dia
+        kg_salidas_acum += kg_prod_dia
+        kg_ventas_acum += kg_ventas_dia
+        kg_teorico_cierre = kg_stock_apertura + kg_salidas_acum - kg_ventas_acum
+        kg_real_cierre = compute_bc_stock_real_cierre(lot_snapshot, day)
+        kg_diferencia = kg_teorico_cierre - kg_real_cierre
+        detalle_bc.append(
+            {
+                "fecha": det["fecha"],
+                "kg_stock_inicial": kg_stock_ini_dia,
+                "kg_produccion": kg_prod_dia,
+                "kg_ventas": kg_ventas_dia,
+                "kg_stock_teorico_dia": kg_stock_teorico_dia,
+                "kg_stock_teorico_cierre": kg_teorico_cierre,
+                "kg_stock_real_cierre": kg_real_cierre,
+                "kg_diferencia": kg_diferencia,
+            }
+        )
+
+    if detalle_bc:
+        kg_stock_real = detalle_bc[-1]["kg_stock_real_cierre"]
+        kg_stock_teorico_cierre = detalle_bc[-1]["kg_stock_teorico_cierre"]
+    else:
+        kg_stock_real = bc_balance["kg_stock_final"]
+        kg_stock_teorico_cierre = kg_stock_apertura + kg_produccion - kg_ventas
+    kg_stock_teorico_sum = sum(to_float(r["kg_stock_teorico_dia"]) for r in detalle_bc)
+    kg_stock_teorico = kg_stock_teorico_cierre
+    kg_check = kg_stock_teorico - kg_stock_real
+    check_ok = abs(kg_check) <= BC_BALANCE_CHECK_TOLERANCE_KG
+
+    lot_detalle = build_bc_balance_lot_detalle(bc_balance, innova_lotes_material)
+    detalle_por_tipo = build_bc_balance_por_tipo(lot_detalle)
+
+    report_data["bc_balance_eg"] = {
+        "loaded": True,
+        "kg_stock_inicial": kg_stock_inicial,
+        "lotes_stock_inicial": bc_balance["lotes_stock_inicial"],
+        "kg_stock_apertura": kg_stock_apertura,
+        "lotes_stock_apertura": bc_balance["lotes_stock_apertura"],
+        "kg_produccion": kg_produccion,
+        "kg_ventas": kg_ventas,
+        "lotes_ventas": bc_balance["lotes_ventas"],
+        "kg_stock_teorico": kg_stock_teorico,
+        "kg_stock_teorico_cierre": kg_stock_teorico_cierre,
+        "kg_stock_teorico_sum": kg_stock_teorico_sum,
+        "kg_stock_real": kg_stock_real,
+        "kg_stock_final": kg_stock_real,
+        "lotes_stock_final": bc_balance["lotes_stock_final"],
+        "lotes_stock_final_bc": bc_balance["lotes_stock_final_bc"],
+        "kg_check": kg_check,
+        "check_ok": check_ok,
+        "lotes_empaque_mes": bc_balance["lotes_empaque_mes"],
+        "detalle_diario": detalle_bc,
+        "lot_detalle": lot_detalle,
+        "detalle_por_tipo": detalle_por_tipo,
+    }
+
+    k = report_data["kpis"]
+    k["bc_bal_kg_stock_inicial"] = kg_stock_inicial
+    k["bc_bal_kg_stock_apertura"] = kg_stock_apertura
+    k["bc_bal_kg_produccion"] = kg_produccion
+    k["bc_bal_kg_ventas"] = kg_ventas
+    k["bc_bal_kg_stock_teorico"] = kg_stock_teorico
+    k["bc_bal_kg_stock_real"] = kg_stock_real
+    k["bc_bal_kg_stock_final"] = kg_stock_real
+    k["bc_bal_kg_check"] = kg_check
+    k["bc_bal_check_ok"] = check_ok
+
+    report_data.setdefault("sql_trace", {"view_or_tables": [], "params": {}, "queries": []})
+    report_data["sql_trace"]["queries"].extend(bc_balance["sql_trace"]["queries"])
+    report_data["sql_trace"]["view_or_tables"] = list(
+        dict.fromkeys(
+            report_data["sql_trace"].get("view_or_tables", [])
+            + bc_balance["sql_trace"]["view_or_tables"]
+        )
+    )
 
 
 def parse_fecha_es(fecha: str) -> str:
@@ -1503,6 +2197,323 @@ def build_stock_merma_table_rows(detalle: list[dict[str, Any]]) -> str:
     return "\n".join(rows)
 
 
+BC_BALANCE_ESTADO_LABELS = {
+    "stock_final": "Stock final",
+    "vendido": "Vendido",
+    "apertura": "Apertura",
+    "empaque_mes": "Empaque mes",
+}
+
+
+def build_bc_balance_eg_lote_detail_table(lotes: list[dict[str, Any]]) -> str:
+    body_rows: list[str] = []
+    for lot in lotes:
+        estado = BC_BALANCE_ESTADO_LABELS.get(str(lot.get("estado")), str(lot.get("estado")))
+        body_rows.append(
+            "<tr>"
+            f"<td><code>{html.escape(str(lot['lot']))}</code></td>"
+            f"<td>{html.escape(str(lot.get('tipo_nombre', '')))}</td>"
+            f"<td>{html.escape(str(lot.get('item_no') or '—'))}</td>"
+            f"<td>{_format_sql_date(lot.get('fe_empaque'))}</td>"
+            f"<td class='num'>{fmt_num(lot.get('kg_innova', 0))}</td>"
+            f"<td class='num'>{int(lot.get('packs_innova', 0))}</td>"
+            f"<td class='num'>{fmt_num(lot.get('kg_bc', 0))}</td>"
+            f"<td class='num'>{fmt_num(lot.get('kg_ventas_bc', 0))}</td>"
+            f"<td class='num'>{fmt_num(lot.get('kg_stock_final', 0))}</td>"
+            f"<td>{html.escape(estado)}</td>"
+            "</tr>"
+        )
+    if not body_rows:
+        return "<p class='muted'>Sin lotes para este tipo de producto.</p>"
+    return (
+        "<table class='bc-lot-table'>"
+        "<thead><tr>"
+        "<th>Lote</th><th>Producto</th><th>Item BC</th><th>Fecha empaque</th>"
+        "<th class='num'>Kg Innova</th><th class='num'>Cajas</th>"
+        "<th class='num'>Kg BC</th><th class='num'>Kg ventas BC</th>"
+        "<th class='num'>Kg stock final</th><th>Estado</th>"
+        "</tr></thead><tbody>"
+        + "".join(body_rows)
+        + "</tbody></table>"
+    )
+
+
+def build_bc_balance_eg_lote_table_rows(lot_detalle: list[dict[str, Any]]) -> str:
+    rows: list[str] = []
+    for lot in lot_detalle:
+        estado = BC_BALANCE_ESTADO_LABELS.get(str(lot.get("estado")), str(lot.get("estado")))
+        rows.append(
+            "<tr>"
+            f"<td>{html.escape(str(lot.get('material') or '—'))}</td>"
+            f"<td>{html.escape(str(lot.get('material_nombre') or lot.get('tipo_nombre') or '—'))}</td>"
+            f"<td><code>{html.escape(str(lot['lot']))}</code></td>"
+            f"<td>{html.escape(str(lot.get('item_no') or '—'))}</td>"
+            f"<td>{html.escape(str(lot.get('item_description') or '—'))}</td>"
+            f"<td>{_format_sql_date(lot.get('fe_empaque'))}</td>"
+            f"<td>{_format_sql_date(lot.get('prday_min'))}</td>"
+            f"<td class='num'>{fmt_num(lot.get('kg_innova', 0))}</td>"
+            f"<td class='num'>{int(lot.get('packs_innova', 0))}</td>"
+            f"<td class='num'>{fmt_num(lot.get('kg_bc', 0))}</td>"
+            f"<td class='num'>{fmt_num(lot.get('kg_ventas_bc', 0))}</td>"
+            f"<td class='num'>{fmt_num(lot.get('kg_stock_final', 0))}</td>"
+            f"<td>{html.escape(estado)}</td>"
+            "</tr>"
+        )
+    return "\n".join(rows)
+
+
+def build_bc_balance_eg_tipo_table_rows(detalle_por_tipo: list[dict[str, Any]]) -> str:
+    rows: list[str] = []
+    for tipo in detalle_por_tipo:
+        tipo_id = html.escape(_tipo_slug(str(tipo.get("tipo_key"))))
+        lotes = tipo.get("lotes_detalle") or []
+        detail_id = f"bc-bal-tipo-{tipo_id}"
+        rows.append(
+            "<tr class='bc-date-row'>"
+            f"<td class='bc-date-cell'>"
+            f"<button type='button' class='bc-toggle' aria-expanded='false' "
+            f"aria-controls='{detail_id}' title='Ver lotes del tipo'>▸</button> "
+            f"{html.escape(str(tipo.get('material') or '—'))}"
+            f"<span class='bc-date-meta muted'> ({int(tipo.get('lotes', 0))} lotes)</span>"
+            "</td>"
+            f"<td>{html.escape(str(tipo.get('tipo_nombre') or '—'))}</td>"
+            f"<td>{html.escape(str(tipo.get('item_no') or '—'))}</td>"
+            f"<td class='num'>{int(tipo.get('lotes', 0))}</td>"
+            f"<td class='num'>{int(tipo.get('lotes_stock_final', 0))}</td>"
+            f"<td class='num'>{fmt_num(tipo.get('kg_innova', 0))}</td>"
+            f"<td class='num'>{fmt_num(tipo.get('kg_ventas_bc', 0))}</td>"
+            f"<td class='num'>{fmt_num(tipo.get('kg_stock_final', 0))}</td>"
+            "</tr>"
+            f"<tr id='{detail_id}' class='bc-detail-row' hidden>"
+            f"<td colspan='8'>{build_bc_balance_eg_lote_detail_table(lotes)}</td>"
+            "</tr>"
+        )
+    return "\n".join(rows)
+
+
+def build_bc_balance_eg_table_rows(detalle: list[dict[str, Any]]) -> str:
+    rows = []
+    for r in detalle:
+        diff_class = ""
+        if abs(to_float(r.get("kg_diferencia"))) > BC_BALANCE_CHECK_TOLERANCE_KG:
+            diff_class = " check-warn-cell"
+        rows.append(
+            "<tr>"
+            f"<td>{html.escape(r['fecha'])}</td>"
+            f"<td class='num'>{fmt_num(r['kg_stock_inicial'])}</td>"
+            f"<td class='num'>{fmt_num(r['kg_produccion'])}</td>"
+            f"<td class='num'>{fmt_num(r['kg_ventas'])}</td>"
+            f"<td class='num'>{fmt_num(r['kg_stock_teorico_dia'])}</td>"
+            f"<td class='num'>{fmt_num(r['kg_stock_teorico_cierre'])}</td>"
+            f"<td class='num'>{fmt_num(r['kg_stock_real_cierre'])}</td>"
+            f"<td class='num{diff_class}'>{fmt_num(r['kg_diferencia'])}</td>"
+            "</tr>"
+        )
+    return "\n".join(rows)
+
+
+def build_bc_balance_eg_section_html(
+    start: dt.date,
+    end: dt.date,
+    bc_balance: dict[str, Any] | None,
+) -> str:
+    if not bc_balance or not bc_balance.get("loaded"):
+        return (
+            "<article class='chart-card'>"
+            "<h3>Balance BC almacenes E/G</h3>"
+            "<p class='muted'>BC no disponible (--skip-bc o error de conexion).</p>"
+            "</article>"
+        )
+
+    detalle = bc_balance["detalle_diario"]
+    rows_html = build_bc_balance_eg_table_rows(detalle)
+    detalle_por_tipo = bc_balance.get("detalle_por_tipo") or []
+    lot_detalle = bc_balance.get("lot_detalle") or []
+    tipo_rows_html = build_bc_balance_eg_tipo_table_rows(detalle_por_tipo)
+    lote_rows_html = build_bc_balance_eg_lote_table_rows(lot_detalle)
+    tot_tipos = len(detalle_por_tipo)
+    tot_lotes_det = len(lot_detalle)
+    tot_lotes_stock_final = sum(int(t.get("lotes_stock_final") or 0) for t in detalle_por_tipo)
+    tot_kg_innova_lotes = sum(to_float(t.get("kg_innova")) for t in detalle_por_tipo)
+    tot_kg_ventas_lotes = sum(to_float(t.get("kg_ventas_bc")) for t in detalle_por_tipo)
+    tot_kg_stock_final_lotes = sum(to_float(t.get("kg_stock_final")) for t in detalle_por_tipo)
+    check_ok = bool(bc_balance.get("check_ok"))
+    check_class = "check-ok" if check_ok else "check-warn"
+    check_label = "Cuadra" if check_ok else "Descuadre"
+    reglas_items = "".join(f"<li>{html.escape(rule)}</li>" for rule in PREMISA_BC_BALANCE_EG_REGLAS)
+    stock_ini_sub = (
+        f"Empaque anterior al dia de venta · {bc_balance['lotes_stock_inicial']:,} lotes"
+    )
+
+    return f"""
+      <section class="grid">
+        <article class="card">
+          <div class="kpi-title">Stock inicial BC (kg)</div>
+          <div class="kpi-value">{fmt_num(bc_balance['kg_stock_inicial'])}</div>
+          <div class="kpi-sub">{html.escape(stock_ini_sub)}</div>
+        </article>
+        <article class="card">
+          <div class="kpi-title">Salidas Innova (kg)</div>
+          <div class="kpi-value">{fmt_num(bc_balance['kg_produccion'])}</div>
+          <div class="kpi-sub">Salidas CAJA del periodo (premisa 3)</div>
+        </article>
+        <article class="card">
+          <div class="kpi-title">Ventas BC E/G (kg)</div>
+          <div class="kpi-value">{fmt_num(bc_balance['kg_ventas'])}</div>
+          <div class="kpi-sub">{bc_balance['lotes_ventas']:,} lotes · Location E y G</div>
+        </article>
+        <article class="card">
+          <div class="kpi-title">Stock teorico (kg)</div>
+          <div class="kpi-value">{fmt_num(bc_balance['kg_stock_teorico'])}</div>
+          <div class="kpi-sub">Stock apertura + Salidas − Ventas (cierre)</div>
+        </article>
+        <article class="card">
+          <div class="kpi-title">Stock real BC (kg)</div>
+          <div class="kpi-value">{fmt_num(bc_balance['kg_stock_real'])}</div>
+          <div class="kpi-sub">Empaque del periodo sin venta · {bc_balance['lotes_stock_final']:,} lotes ({bc_balance['lotes_stock_final_bc']:,} con kg BC)</div>
+        </article>
+        <article class="card {check_class}">
+          <div class="kpi-title">Check (kg)</div>
+          <div class="kpi-value">{fmt_num(bc_balance['kg_check'])}</div>
+          <div class="kpi-sub">{check_label}: Stock teorico − Stock real</div>
+        </article>
+      </section>
+      <article class="chart-card" style="margin-top:14px;">
+        <div class="section-head">
+          <h3>Balance de masa BC (almacenes E y G)</h3>
+          <button type="button" class="btn-export" data-table-id="bcBalanceEgTable" data-file-name="balance_bc_almacenes_eg">
+            <span class="excel-icon">X</span>
+            Exportar Excel
+          </button>
+        </div>
+        <p class="muted" style="margin-top:0;">
+          <strong>Stock inicial (dia)</strong> = ventas del dia con [Fecha empaque] &lt; dia de venta (incluye empaques de dias anteriores).
+          <strong>Salidas Innova</strong> = salidas CAJA del dia (premisa 3).
+          <strong>Ventas</strong> = ILE Entry Type 1 en E/G por [Posting Date].
+          <strong>Stock teorico (dia)</strong> = Stock inicial + Salidas Innova − Ventas del dia (flujo diario).
+          <strong>Stock teorico (cierre)</strong> = Stock apertura + Salidas Innova acumuladas − Ventas acumuladas.
+          <strong>Stock apertura</strong> = empaque anterior al periodo sin venta previa (E/G): <strong>{fmt_num(bc_balance['kg_stock_apertura'])}</strong> kg.
+          <strong>Stock real (cierre)</strong> = empaque del periodo hasta ese dia sin venta hasta ese dia.
+          <strong>Diferencia</strong> = Stock teorico cierre − Stock real cierre.
+          <strong>Fines de semana</strong> = sin Salidas Innova ni Ventas; el stock de cierre (teorico y real) se mantiene del ultimo dia laborable.
+        </p>
+        <p class="balance-formula">
+          Stock teórico cierre fin de mes: <strong>{fmt_num(bc_balance['kg_stock_teorico'])}</strong>
+          &nbsp;|&nbsp; Stock real fin de mes: <strong>{fmt_num(bc_balance['kg_stock_real'])}</strong>
+          <span class="{check_class}">(check {fmt_num(bc_balance['kg_check'])} kg)</span>
+        </p>
+        <table id="bcBalanceEgTable">
+          <thead>
+            <tr>
+              <th>Fecha</th>
+              <th class="num">Stock inicial (kg)</th>
+              <th class="num">Salidas Innova (kg)</th>
+              <th class="num">Ventas BC E/G (kg)</th>
+              <th class="num">Stock teorico dia (kg)</th>
+              <th class="num">Stock teorico cierre (kg)</th>
+              <th class="num">Stock real cierre (kg)</th>
+              <th class="num">Diferencia (kg)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows_html}
+            <tr>
+              <td><strong>TOTAL / CIERRE</strong></td>
+              <td class="num"><strong>{fmt_num(bc_balance['kg_stock_inicial'])}</strong></td>
+              <td class="num"><strong>{fmt_num(bc_balance['kg_produccion'])}</strong></td>
+              <td class="num"><strong>{fmt_num(bc_balance['kg_ventas'])}</strong></td>
+              <td class="num"><strong>—</strong></td>
+              <td class="num"><strong>{fmt_num(bc_balance['kg_stock_teorico'])}</strong></td>
+              <td class="num"><strong>{fmt_num(bc_balance['kg_stock_real'])}</strong></td>
+              <td class="num"><strong class="{check_class}">{fmt_num(bc_balance['kg_check'])}</strong></td>
+            </tr>
+          </tbody>
+        </table>
+      </article>
+      <article class="chart-card" style="margin-top:14px;">
+        <div class="section-head">
+          <h3>Desglose por tipo de producto</h3>
+          <button type="button" class="btn-export" data-table-id="bcBalanceEgTipoTable" data-file-name="balance_bc_eg_por_tipo">
+            <span class="excel-icon">X</span>
+            Exportar Excel
+          </button>
+        </div>
+        <p class="muted" style="margin-top:0;">
+          Tipo de producto desde Innova (<code>proc_materials</code>). Pulsa ▸ para ver los lotes del tipo.
+          {tot_tipos:,} tipos · {tot_lotes_det:,} lotes en el periodo.
+        </p>
+        <table id="bcBalanceEgTipoTable">
+          <thead>
+            <tr>
+              <th>Material</th>
+              <th>Producto</th>
+              <th>Item BC</th>
+              <th class="num">Lotes</th>
+              <th class="num">Lotes stock final</th>
+              <th class="num">Kg Innova</th>
+              <th class="num">Kg ventas BC</th>
+              <th class="num">Kg stock final</th>
+            </tr>
+          </thead>
+          <tbody>
+            {tipo_rows_html}
+            <tr>
+              <td colspan="3"><strong>TOTAL</strong></td>
+              <td class="num"><strong>{tot_lotes_det:,}</strong></td>
+              <td class="num"><strong>{tot_lotes_stock_final:,}</strong></td>
+              <td class="num"><strong>{fmt_num(tot_kg_innova_lotes)}</strong></td>
+              <td class="num"><strong>{fmt_num(tot_kg_ventas_lotes)}</strong></td>
+              <td class="num"><strong>{fmt_num(tot_kg_stock_final_lotes)}</strong></td>
+            </tr>
+          </tbody>
+        </table>
+      </article>
+      <article class="chart-card" style="margin-top:14px;">
+        <div class="section-head">
+          <h3>Detalle por lote</h3>
+          <button type="button" class="btn-export" data-table-id="bcBalanceEgLoteTable" data-file-name="balance_bc_eg_por_lote">
+            <span class="excel-icon">X</span>
+            Exportar Excel
+          </button>
+        </div>
+        <p class="muted" style="margin-top:0;">
+          Lote = <code>proc_packs.number</code> (Innova) / <code>[Lot No.]</code> (BC).
+          Estados: stock final (sin venta en el mes), vendido, apertura (empaque previo al periodo).
+        </p>
+        <table id="bcBalanceEgLoteTable">
+          <thead>
+            <tr>
+              <th>Material</th>
+              <th>Producto</th>
+              <th>Lote</th>
+              <th>Item BC</th>
+              <th>Descripcion BC</th>
+              <th>Fecha empaque</th>
+              <th>Salida Innova</th>
+              <th class="num">Kg Innova</th>
+              <th class="num">Cajas</th>
+              <th class="num">Kg BC</th>
+              <th class="num">Kg ventas BC</th>
+              <th class="num">Kg stock final</th>
+              <th>Estado</th>
+            </tr>
+          </thead>
+          <tbody>
+            {lote_rows_html}
+          </tbody>
+        </table>
+      </article>
+      <section class="premisa-box" style="margin-top:14px;">
+        <h3 class="premisa-head">Reglas balance BC E/G</h3>
+        <ul class="premisa-list">{reglas_items}</ul>
+        <p class="premisa-note muted">
+          Lotes con empaque en el periodo (BC): {bc_balance['lotes_empaque_mes']:,}.
+          Tolerancia check: ±{fmt_num(BC_BALANCE_CHECK_TOLERANCE_KG, 0)} kg.
+        </p>
+      </section>
+    """
+
+
 def _format_bc_posting_range(pedido: dict[str, Any]) -> str:
     date_min = pedido.get("posting_date_min")
     date_max = pedido.get("posting_date_max")
@@ -1652,6 +2663,8 @@ def render_html(
     stock_merma_rows_html = build_stock_merma_table_rows(detalle)
     bc_cruce_detalle = data.get("bc_cruce_detalle", [])
     bc_cruce_rows_html = build_bc_cruce_table_rows(bc_cruce_detalle)
+    bc_balance_eg = data.get("bc_balance_eg")
+    bc_balance_section_html = build_bc_balance_eg_section_html(start, end, bc_balance_eg)
     bc_loaded = bool(data.get("bc_cruce"))
     bc_note = (
         "Enlace por proc_packs.number = BC Item Ledger Entry [Lot No.]. Pedido desde Sales Shipment Line."
@@ -2012,6 +3025,33 @@ def render_html(
       font-size: 13px;
       color: #334155;
     }}
+    .balance-formula {{
+      margin: 0 0 12px 0;
+      padding: 10px 12px;
+      border-radius: 10px;
+      background: #f8fafc;
+      border: 1px solid var(--line);
+      font-size: 14px;
+      font-variant-numeric: tabular-nums;
+    }}
+    .check-ok .kpi-value, .balance-formula .check-ok {{
+      color: #0f766e;
+    }}
+    .check-warn .kpi-value, .balance-formula .check-warn {{
+      color: #b42318;
+    }}
+    .card.check-ok {{
+      border-color: #6ee7b7;
+      background: #ecfdf5;
+    }}
+    .card.check-warn {{
+      border-color: #fecaca;
+      background: #fef2f2;
+    }}
+    .check-warn-cell {{
+      color: #b42318;
+      font-weight: 600;
+    }}
     .nota-alerta-vap-inline {{
       margin-top: 12px;
       padding: 10px 12px;
@@ -2363,7 +3403,7 @@ def render_html(
         </div>
         <button type="button" class="btn-export btn-export-top" id="btnExportAll" data-file-name="reporte_biomasa_completo">
           <span class="excel-icon">X</span>
-          Exportar todo en Excel (5 hojas)
+          Exportar todo en Excel (6 hojas)
         </button>
       </div>
       <p>Periodo: <strong>{format_date_es(start)}</strong> a <strong>{format_date_es(end)}</strong></p>
@@ -2377,6 +3417,7 @@ def render_html(
       <button type="button" class="tab-btn" role="tab" aria-selected="false" aria-controls="tab-detalle" data-tab="tab-detalle" id="tab-btn-detalle">Detalle diario</button>
       <button type="button" class="tab-btn" role="tab" aria-selected="false" aria-controls="tab-balance" data-tab="tab-balance" id="tab-btn-balance">Balance</button>
       <button type="button" class="tab-btn" role="tab" aria-selected="false" aria-controls="tab-bc" data-tab="tab-bc" id="tab-btn-bc">Cruce BC</button>
+      <button type="button" class="tab-btn" role="tab" aria-selected="false" aria-controls="tab-bc-balance" data-tab="tab-bc-balance" id="tab-btn-bc-balance">Balance BC E/G</button>
       <button type="button" class="tab-btn" role="tab" aria-selected="false" aria-controls="tab-materiales" data-tab="tab-materiales" id="tab-btn-materiales">Materiales</button>
       <button type="button" class="tab-btn tab-btn-debug" role="tab" aria-selected="false" aria-controls="tab-debug" data-tab="tab-debug" id="tab-btn-debug">Debug</button>
     </nav>
@@ -2523,6 +3564,10 @@ def render_html(
         <section class="tables">
           {bc_cruce_section_html}
         </section>
+      </section>
+
+      <section class="tab-panel" id="tab-bc-balance" role="tabpanel" aria-labelledby="tab-btn-bc-balance">
+        {bc_balance_section_html}
       </section>
 
       <section class="tab-panel" id="tab-materiales" role="tabpanel" aria-labelledby="tab-btn-materiales">
@@ -2781,6 +3826,9 @@ function exportAllTablesToExcel(fileName) {{
     {{ sheetName: 'Detalle diario', tableId: 'detalleTable' }},
     {{ sheetName: 'Stock y merma', tableId: 'stockMermaTable' }},
     {{ sheetName: 'Cruce BC', tableId: 'bcCruceTable' }},
+    {{ sheetName: 'Balance BC E/G', tableId: 'bcBalanceEgTable' }},
+    {{ sheetName: 'BC E/G por tipo', tableId: 'bcBalanceEgTipoTable' }},
+    {{ sheetName: 'BC E/G por lote', tableId: 'bcBalanceEgLoteTable' }},
     {{ sheetName: 'Top entrada', tableId: 'topEntradasTable' }},
     {{ sheetName: 'Top salida', tableId: 'topSalidasTable' }}
   ];
@@ -2888,6 +3936,7 @@ def main() -> None:
         enrich_stock_validation(report_data, stock_inicial, args.stock_final_fisico)
         finalize_balance_kpis(report_data)
         innova_lotes = fetch_innova_salidas_lotes(conn, start, end)
+        innova_lotes_material = fetch_innova_lotes_por_material(conn, start, end)
     finally:
         conn.close()
 
@@ -2910,6 +3959,14 @@ def main() -> None:
                 )
                 bc_data = fetch_bc_salidas_pedido(bc_conn, start, end)
                 attach_bc_cruce_to_report(report_data, bc_data, innova_lotes)
+                print("Consultando balance BC almacenes E/G...")
+                bc_balance = fetch_bc_balance_eg(bc_conn, start, end)
+                attach_bc_balance_eg_to_report(
+                    report_data,
+                    bc_balance,
+                    innova_lotes,
+                    innova_lotes_material,
+                )
                 print("Business Central cargado correctamente.")
             finally:
                 bc_conn.close()

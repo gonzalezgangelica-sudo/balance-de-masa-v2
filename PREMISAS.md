@@ -24,6 +24,7 @@ Documento canonico del proyecto **CALCULO_BIOMASA**. Cualquier cambio en reglas 
 | 5 | **Merma** — balance: Entradas TINA − Salidas CAJA − Stock de tinas | Confirmada (implementada) |
 | 6 | **Cruce BC / pedidos** — enlace por lote; ventas ILE; pedido desde albaran | Confirmada (implementada) |
 | 7 | Stock inventario / arrastre | Pendiente |
+| 8 | **Balance BC E/G** — stock inicial, salidas, ventas, teorico/real y check (almacenes E y G) | Confirmada (implementada) |
 
 > Las reglas anteriores basadas en `regtime`, filtro `%tina%` en nombre de material, o totales de marzo 2026 con logica legacy **quedan sustituidas** por las premisas de esta seccion.
 
@@ -531,6 +532,52 @@ Cifras orientativas del cruce anterior (~87 % lotes enlazados). Regenerar con pr
 
 ---
 
+## Premisa 8 — Balance BC almacenes E y G
+
+Balance de masa en Business Central para **Location Code E y G** unicamente.
+
+### Reglas principales
+
+| Concepto | Definicion |
+|----------|------------|
+| **Stock inicial (dia)** | Ventas del dia con `[Fecha empaque]` anterior al dia de venta |
+| **Salidas Innova** | Salidas CAJA del dia (`proc_packs`, premisa 3) |
+| **Ventas BC** | ILE `[Entry Type] = 1`, `[Posting Date]` del dia, almacenes E/G |
+| **Stock teorico (dia)** | Stock inicial + Salidas Innova − Ventas del dia (flujo) |
+| **Stock teorico (cierre)** | Stock apertura + Salidas Innova acumuladas − Ventas acumuladas |
+| **Stock apertura** | Empaque anterior al periodo sin venta previa en E/G |
+| **Stock real (cierre)** | Empaque del periodo hasta ese dia sin venta hasta ese dia (kg BC por lote) |
+| **Diferencia** | Stock teorico cierre − Stock real cierre |
+
+### Fines de semana y festivos
+
+En **fines de semana** (y dias sin actividad comercial):
+
+- **No hay** Salidas Innova ni Ventas BC → esas columnas quedan a **0 kg**.
+- **Si hay** stock de inicio y stock final del dia: el **stock teorico cierre** y el **stock real cierre** se mantienen (arrastre desde el ultimo dia laborable con movimiento).
+- La columna **Stock inicial (dia)** queda a 0 al no registrarse ventas ese dia; el inventario de cierre sigue reflejado en las columnas de stock teorico/real.
+
+La tabla del informe incluye **todos los dias del mes** (laborables y fines de semana) para mostrar el cierre diario completo.
+
+### Desglose por tipo de producto y lote
+
+| Nivel | Clave | Campos |
+|-------|-------|--------|
+| **Tipo producto** | `proc_materials.material` (Innova) | Nombre material, totales kg Innova / ventas BC / stock final, nº lotes |
+| **Lote** | `proc_packs.number` = BC `[Lot No.]` | Fecha empaque, kg Innova, kg BC, kg ventas, estado (stock final / vendido / apertura) |
+| **Item BC** | `[Item No.]` / `[Description]` en ILE | Respaldo cuando no hay material Innova enlazado |
+
+En la pestaña **Balance BC E/G** hay dos tablas adicionales:
+
+1. **Por tipo de producto** — resumen agrupado con expansion de lotes.
+2. **Detalle por lote** — listado completo exportable a Excel.
+
+### Implementacion
+
+Constante `PREMISA_BC_BALANCE_EG_REGLAS` en `generar_reporte_biomasa.py`, funciones `fetch_bc_balance_eg` y `attach_bc_balance_eg_to_report`.
+
+---
+
 ## Formulas derivadas (arrastre)
 
 ```
@@ -543,6 +590,8 @@ Stock inventario cierre = Stock inicial + Entradas TINA − Tinas procesadas
 
 - Premisa **stock inventario / arrastre** entre meses (premisa 7)
 - Actualizar arrastre CLI para usar stock de tinas en encadenamiento
+
+> Premisa 8 (Balance BC E/G) documentada arriba; mantener alineada con `PREMISA_BC_BALANCE_EG_REGLAS`.
 
 ## Mantenimiento
 
