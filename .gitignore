@@ -1,0 +1,21 @@
+# Entorno local
+.env
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Salidas generadas (regenerar con generar_reporte_biomasa.py / exportar_contraste_mes.py)
+Reports/*
+!Reports/.gitkeep
+logs/*.log
+
+# Artefactos locales de AL/BC (no pertenecen a este proyecto Python)
+.alpackages/
+.snapshots/
+
+# IDE
+.vscode/
