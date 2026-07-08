@@ -495,7 +495,7 @@ def print_console_summary(start: dt.date, end: dt.date, output_path: Path, repor
       print(f"Stock inventario cierre (kg): {fmt_num(k['kg_stock_inventario'])}")
     print(f"Stock sin procesar fin de periodo (kg): {fmt_num(k['kg_stock_sin_procesar_fin'])}")
     print(f"% Diferencia: {fmt_pct(k['pct_diferencia'])}")
-    print(f"Packs entrada: {k['packs_entrada']}")
+    print(f"Nº de Tinas (entrada): {k['packs_entrada']}")
     print(f"Packs salida: {k['packs_salida']}")
     print(f"Movimientos TINA procesada: {k['movs_consumo']}")
     if k.get("bc_lotes_innova"):
@@ -521,7 +521,7 @@ def print_console_summary(start: dt.date, end: dt.date, output_path: Path, repor
     if k.get("arrastre_activo"):
       print(
           f"Tinas arrastradas ({k.get('tinas_arrastradas_desde')} a {k.get('tinas_arrastradas_hasta')} "
-          f"consumidas en periodo): {int(k.get('tinas_arrastradas_packs', 0)):,} packs / "
+          f"consumidas en periodo): {int(k.get('tinas_arrastradas_packs', 0)):,} Nº de Tinas / "
           f"{fmt_num(k.get('kg_tinas_arrastradas', 0))} kg"
       )
     if k.get("kg_stock_final_fisico") is not None:
@@ -1498,7 +1498,7 @@ def render_html(
       stock_cards_html += (
         f"<article class='card'><div class='kpi-title'>Tinas arrastradas (kg)</div>"
         f"<div class='kpi-value'>{fmt_num(k.get('kg_tinas_arrastradas', 0))}</div>"
-        f"<div class='kpi-sub'>{int(k.get('tinas_arrastradas_packs', 0)):,} packs de "
+        f"<div class='kpi-sub'>{int(k.get('tinas_arrastradas_packs', 0)):,} Nº de Tinas de "
         f"{html.escape(str(k.get('tinas_arrastradas_desde', '')))} a "
         f"{html.escape(str(k.get('tinas_arrastradas_hasta', '')))}</div></article>"
       )
@@ -1866,7 +1866,7 @@ def render_html(
     {premisa_entrada_html}
 
     <section class="grid">
-      <article class="card"><div class="kpi-title">Entradas TINA (kg)</div><div class="kpi-value">{fmt_num(k['kg_entrada_tina'])}</div><div class="kpi-sub">{k['packs_entrada']} packs</div></article>
+      <article class="card"><div class="kpi-title">Entradas TINA (kg)</div><div class="kpi-value">{fmt_num(k['kg_entrada_tina'])}</div><div class="kpi-sub">{k['packs_entrada']} Nº de Tinas</div></article>
       <article class="card"><div class="kpi-title">TINA procesada (kg)</div><div class="kpi-value">{fmt_num(k['kg_consumo_tina'])}</div><div class="kpi-sub">{k['movs_consumo']} movimientos · entrada, no CAJA</div></article>
       <article class="card"><div class="kpi-title">Salidas CAJA (kg)</div><div class="kpi-value">{fmt_num(k['kg_salida_no_tina'])}</div><div class="kpi-sub">{k['packs_salida']} packs · graders y basculas</div></article>
       <article class="card"><div class="kpi-title">Stock de entrada (kg)</div><div class="kpi-value">{fmt_num(k.get('kg_stock_entrada', 0))}</div><div class="kpi-sub">Entradas TINA − TINA procesada · no todo se procesa</div></article>

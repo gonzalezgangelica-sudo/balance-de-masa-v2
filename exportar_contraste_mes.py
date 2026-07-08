@@ -165,7 +165,7 @@ def write_contraste_md(
         lines.extend([
             "## Arrastre",
             "",
-            f"- Tinas arrastradas (mes anterior): **{int(tinas['packs']):,}** packs / "
+            f"- Tinas arrastradas (mes anterior): **{int(tinas['packs']):,}** Nº de Tinas / "
             f"**{fmt_num(tinas['kg'])}** kg",
             f"- Periodo origen: {format_date_es(tinas['mes_origen_inicio'])} a "
             f"{format_date_es(tinas['mes_origen_fin'])}",
@@ -291,7 +291,7 @@ def main() -> None:
             ["Merma", csv_num(k.get("kg_merma")), "kg"],
             ["% Merma", csv_num(k.get("pct_merma")), "%"],
             ["Balance TINA-CAJA", csv_num(k["kg_balance_entrada_salida"]), "kg"],
-            ["Packs entrada", str(k["packs_entrada"]), "ud"],
+            ["Nº de Tinas (entrada)", str(k["packs_entrada"]), "ud"],
             ["Packs salida", str(k["packs_salida"]), "ud"],
         ],
     )
@@ -357,7 +357,7 @@ def main() -> None:
             [
                 ["Mes origen desde", format_date_es(tinas["mes_origen_inicio"])],
                 ["Mes origen hasta", format_date_es(tinas["mes_origen_fin"])],
-                ["Packs", str(tinas["packs"])],
+                ["Nº de Tinas", str(tinas["packs"])],
                 ["Kg", csv_num(tinas["kg"])],
             ],
         )
