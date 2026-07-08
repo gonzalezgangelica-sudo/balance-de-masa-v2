@@ -348,13 +348,12 @@ def enrich_arrastre_mensual(
 
 
 def finalize_balance_kpis(report_data: dict[str, Any]) -> None:
-    """Merma = Entradas TINA - Salidas CAJA - Stock de entrada. Ver PREMISAS.md."""
+    """Merma = Entradas TINA - Salidas CAJA - Stock de tinas (premisa 5). Ver PREMISAS.md."""
     k = report_data["kpis"]
     detalle = report_data["detalle_diario"]
     stock_ini = k.get("kg_stock_inicial") or 0.0
 
-    # Stock de entrada: kg que entran y no se procesan en el periodo (confirmado negocio).
-    k["kg_stock_entrada"] = k["kg_diferencia"]
+    k["kg_stock_entrada"] = sum(row.get("kg_stock_tina", 0) for row in detalle)
 
     stock_inventario = k.get("kg_stock_final_fisico")
     if stock_inventario is None:
@@ -363,6 +362,7 @@ def finalize_balance_kpis(report_data: dict[str, Any]) -> None:
         if k.get("kg_stock_final_teorico") is not None:
             stock_inventario = k["kg_stock_final_teorico"]
         else:
+            # Premisa 7 pendiente: arrastre provisional Entradas - Procesadas
             stock_inventario = stock_ini + k["kg_diferencia"]
         k["kg_stock_cierre_teorico"] = stock_inventario
     k["kg_stock_inventario"] = stock_inventario
@@ -377,13 +377,13 @@ def finalize_balance_kpis(report_data: dict[str, Any]) -> None:
 
     acumulado_inventario = stock_ini
     for row in detalle:
-        stock_entrada_dia = row["diferencia_kg"]
-        row["kg_stock_entrada"] = stock_entrada_dia
-        acumulado_inventario += stock_entrada_dia
+        stock_tinas_dia = row.get("kg_stock_tina", 0)
+        row["kg_stock_entrada"] = stock_tinas_dia
+        acumulado_inventario += row["diferencia_kg"]
         row["kg_stock_inventario"] = acumulado_inventario
         row["kg_stock_balance"] = acumulado_inventario
         row["kg_merma"] = (
-            row["kg_entrada_tina"] - row["kg_salida_no_tina"] - stock_entrada_dia
+            row["kg_entrada_tina"] - row["kg_salida_no_tina"] - stock_tinas_dia
         )
 
 
@@ -487,8 +487,8 @@ def print_console_summary(start: dt.date, end: dt.date, output_path: Path, repor
     print(f"Entradas TINA (kg): {fmt_num(k['kg_entrada_tina'])}")
     print(f"TINA procesada (kg): {fmt_num(k['kg_consumo_tina'])}")
     print(f"Salidas CAJA (kg): {fmt_num(k['kg_salida_no_tina'])}")
-    print(f"Stock de entrada (kg): {fmt_num(k.get('kg_stock_entrada', 0))}")
-    print(f"Merma (Entradas - Salidas - Stock entrada): {fmt_num(k.get('kg_merma', 0))}")
+    print(f"Stock de tinas (kg): {fmt_num(k.get('kg_stock_entrada', 0))}")
+    print(f"Merma (Entradas - Salidas - Stock tinas): {fmt_num(k.get('kg_merma', 0))}")
     if k.get("pct_merma") is not None:
       print(f"% Merma sobre entradas: {fmt_pct(k['pct_merma'])}")
     if k.get("kg_stock_inventario") is not None:
@@ -496,7 +496,7 @@ def print_console_summary(start: dt.date, end: dt.date, output_path: Path, repor
     print(f"Stock sin procesar fin de periodo (kg): {fmt_num(k['kg_stock_sin_procesar_fin'])}")
     print(f"% Diferencia: {fmt_pct(k['pct_diferencia'])}")
     print(f"Nº de Tinas (entrada): {k['packs_entrada']}")
-    print(f"Packs salida: {k['packs_salida']}")
+    print(f"Packs salida (Nº de Cajas): {k['packs_salida']}")
     print(f"Movimientos TINA procesada: {k['movs_consumo']}")
     if k.get("bc_lotes_innova"):
       print(
@@ -528,6 +528,8 @@ def print_console_summary(start: dt.date, end: dt.date, output_path: Path, repor
       print(f"Stock final fisico (kg): {fmt_num(k['kg_stock_final_fisico'])}")
       print(f"Ajuste conciliacion (kg): {fmt_num(k['kg_ajuste_conciliacion'])}")
     print(f"HTML generado: {output_path}")
+    print(f"\n*** {NOTA_ALERTA_VAP_TITULO} ***")
+    print(NOTA_ALERTA_VAP)
 
 
 def enrich_stock_validation(
@@ -569,53 +571,151 @@ def to_float(value: Any) -> float:
     return float(value)
 
 
-# Premisa de entrada/salida/stock/merma (ver PREMISAS.md). Validadas negocio mar-2026.
+# Premisas canonicas (PREMISAS.md premisas 1-6). Fecha: proc_packs/proc_matxacts.prday.
 PREMISA_ENTRADA_REGLAS = (
-  "Entrada TINA: material con pkpackaging = 3 en dbo.proc_materials.",
+  "Entrada TINA: proc_packs + proc_materials, pkpackaging = 3, rtype IN ('1','12'), fecha prday.",
 )
-PREMISA_SALIDA = (
-  "Salida CAJA: material con pkpackaging distinto de 3 (o sin pkpackaging) en dbo.proc_materials."
+PREMISA_PROCESADA = (
+  "Tinas procesadas: proc_matxacts + proc_materials, pkpackaging = 3, xactpath IN ('1'), fecha prday.",
 )
-PREMISA_TINA_PROCESADA = (
-  "TINA procesada (kg) en proc_matxacts (xactpath=1), material con 'tina' en el nombre. "
-  "Es entrada TINA, no salida CAJA. "
-  "Fecha diaria: proc_packs.regtime de la TINA (proc_matxacts.pack = proc_packs.id)."
-)
-PREMISA_CAJAS = PREMISA_TINA_PROCESADA  # alias historico en codigo
 PREMISA_SALIDA_REGLAS = (
-  "Salida CAJA: pkpackaging <> 3 o pkpackaging NULL en dbo.proc_materials.",
+  "Salida CAJA: proc_packs + proc_materials, pkpackaging <> 3 o NULL, rtype = 1, fecha prday.",
+)
+PREMISA_STOCK_TINAS_REGLAS = (
+  "Stock de tinas: proc_packs, pkpackaging = 3, rtype IN ('1'), fecha prday; SUM(nregs) y SUM(weight).",
 )
 PREMISA_STOCK_MERMA_REGLAS = (
-  "Stock de entrada: kg que entran (TINA) y no se procesan en el periodo.",
-  "Stock de entrada (kg) = Entrada TINA - TINA procesada.",
-  "Merma = desperdicio del procesado; no es stock.",
-  "Balance masa: Entrada TINA = Salidas CAJA + Stock de entrada + Merma.",
-  "Merma (kg) = Entrada TINA - Salidas CAJA - Stock de entrada.",
-  "Stock inventario (arrastre): stock inicial + Entradas - TINA procesada; metrica aparte.",
+  "Stock de tinas: consulta directa premisa 4 (no Entradas - Procesadas).",
+  "Merma (kg) = Entrada TINA - Salidas CAJA - Stock de tinas.",
+  "Balance masa: Entrada TINA = Salidas CAJA + Stock de tinas + Merma.",
+  "Stock inventario / arrastre mensual: premisa 7 pendiente.",
 )
+PREMISA_SALIDA = "Salida CAJA por prday (premisa 3)."
+PREMISA_TINA_PROCESADA = PREMISA_PROCESADA
+PREMISA_CAJAS = PREMISA_PROCESADA  # alias historico
 
+SQL_PK_MATERIAL = "m"
 SQL_LEGACY_ES_ENTRADA = "m.pkpackaging = 3"
 SQL_LEGACY_ES_SALIDA = "(m.pkpackaging <> 3 OR m.pkpackaging IS NULL)"
+SQL_ENTRADA_TINA = "m.pkpackaging = 3 AND p.rtype IN ('1', '12')"
+SQL_SALIDA_CAJA = "(m.pkpackaging <> 3 OR m.pkpackaging IS NULL) AND p.rtype = 1"
+SQL_STOCK_TINA = "mat.pkpackaging = 3 AND pk.rtype IN ('1')"
+SQL_PROCESADA_TINA = "mat.pkpackaging = 3 AND pk.xactpath IN ('1')"
+SQL_PRDAY_RANGO = "CAST({alias}.prday AS date) >= %s AND {alias}.prday < DATEADD(day, 1, %s)"
 
 SQL_VW_STOLT_ES_ENTRADA = "m.pkpackaging = 3"
 SQL_VW_STOLT_ES_SALIDA = "(m.pkpackaging <> 3 OR m.pkpackaging IS NULL)"
 
 PREMISA_BC_PEDIDO_REGLAS = (
   "Clave de enlace: dbo.proc_packs.number (codigo de lote/caja) = bc.[Item Ledger Entry].[Lot No.].",
-  "Ventas BC: Item Ledger Entry (Entry Type = 1); kilos BC = campo [Kilos] (valor absoluto).",
-  "Pedido desde Sales Shipment Line ([Order No.]) del mismo [Document No.].",
+  "Ventas BC: Item Ledger Entry ([Entry Type] = 1); kilos BC = ABS([Kilos]).",
+  "Pedido desde Sales Shipment Line ([Order No.]) del [Document No.] del ILE.",
   "Con pedido: [Order No.] informado en el albaran BC.",
   "Sin pedido: [Order No.] vacio o NULL.",
+  "Cruce por lote (no por fecha): contabilizacion BC puede ser otro dia del mes.",
   "Cruce kg: peso salida Innova (proc_packs.weight) vs [Kilos] BC en lotes enlazados.",
+  "Ver PREMISAS.md — Premisa 6 (premisa legacy BC).",
 )
 SQL_BC_SALIDA_CON_PEDIDO = "NULLIF(LTRIM(RTRIM(sl.[Order No.])), '') IS NOT NULL"
 SQL_BC_SALIDA_SIN_PEDIDO = "NULLIF(LTRIM(RTRIM(sl.[Order No.])), '') IS NULL"
 SQL_BC_ILE_SALE = "ile.[Entry Type] = 1"
 SQL_INNOVA_LOT = "CAST(p.number AS varchar(50))"
 
+# Limitacion conocida — debe mostrarse en todos los resultados (ver PREMISAS.md).
+NOTA_ALERTA_VAP = (
+  "Nota: El producto VAP entra por tinas pero no se procesa; se acumula en stock de tinas "
+  "de forma ficticia y distorsiona entradas, stock y merma. "
+  "Limitacion conocida — sin correccion disponible de momento."
+)
+NOTA_ALERTA_VAP_TITULO = "Alerta — limitacion VAP en stock de tinas"
+
+
+def build_nota_alerta_vap_html() -> str:
+    return (
+        "<footer class='nota-alerta-vap' role='note'>"
+        f"<p class='nota-alerta-vap-titulo'>{html.escape(NOTA_ALERTA_VAP_TITULO)}</p>"
+        f"<p class='nota-alerta-vap-texto'>{html.escape(NOTA_ALERTA_VAP)}</p>"
+        "</footer>"
+    )
+
+
+def build_report_intro_html(
+    start: dt.date,
+    end: dt.date,
+    k: dict[str, Any],
+    source_definition: str,
+    bc_loaded: bool,
+) -> str:
+    bc_status = (
+        f"Cruce BC activo: {int(k.get('bc_lotes_enlazados', 0)):,} de "
+        f"{int(k.get('bc_lotes_innova', 0)):,} lotes enlazados "
+        f"({fmt_pct(k.get('bc_pct_lotes_enlazados'))})."
+        if bc_loaded
+        else "Cruce BC no disponible en esta ejecución (--skip-bc o error de conexión)."
+    )
+    return (
+        "<article class='intro-card'>"
+        "<h2>Guía del informe</h2>"
+        "<p class='intro-lead'>"
+        "Informe de seguimiento de biomasa en planta. Consolida datos de "
+        "<strong>Innova (SQL Server)</strong> y, cuando está disponible, "
+        "<strong>Business Central</strong>. Las reglas de negocio canónicas están en "
+        "<strong>PREMISAS.md</strong> del repositorio."
+        "</p>"
+        "<div class='intro-grid'>"
+        "<section>"
+        "<h3>Terminología</h3>"
+        "<ul class='intro-list'>"
+        "<li><strong>TINA</strong> — entrada de biomasa (<code>pkpackaging = 3</code>).</li>"
+        "<li><strong>CAJA</strong> — salida de producto (<code>pkpackaging &lt;&gt; 3</code>).</li>"
+        "<li><strong>Tinas procesadas</strong> — consumo en <code>proc_matxacts</code>; "
+        "no confundir con salida CAJA.</li>"
+        "<li><strong>Fecha operativa</strong> — campo <code>prday</code> a medianoche.</li>"
+        "</ul>"
+        "</section>"
+        "<section>"
+        "<h3>Capítulos del informe</h3>"
+        "<ol class='intro-list'>"
+        "<li><strong>Resumen</strong> — KPIs del periodo.</li>"
+        "<li><strong>Gráficas</strong> — evolución diaria e indicadores visuales.</li>"
+        "<li><strong>Detalle diario</strong> — tabla día a día con exportación Excel.</li>"
+        "<li><strong>Balance</strong> — stock de tinas, merma y arrastre mensual.</li>"
+        "<li><strong>Cruce BC</strong> — enlace Innova / Business Central por lote.</li>"
+        "<li><strong>Materiales</strong> — top entradas y salidas.</li>"
+        "</ol>"
+        "<p class='intro-debug-note muted'>"
+        "La pestaña <strong>Debug</strong> (auditoría técnica) incluye premisas SQL y consultas "
+        "ejecutadas; no forma parte del informe de negocio."
+        "</p>"
+        "</section>"
+        "</div>"
+        "<section class='intro-snapshot'>"
+        "<h3>Instantánea del periodo</h3>"
+        f"<p class='muted'>{html.escape(source_definition)}</p>"
+        f"<p>{html.escape(bc_status)}</p>"
+        "<div class='intro-kpis'>"
+        f"<div><span class='intro-kpi-label'>Entradas TINA</span>"
+        f"<strong>{fmt_num(k['kg_entrada_tina'])} kg</strong></div>"
+        f"<div><span class='intro-kpi-label'>Salidas CAJA</span>"
+        f"<strong>{fmt_num(k['kg_salida_no_tina'])} kg</strong></div>"
+        f"<div><span class='intro-kpi-label'>Stock de tinas</span>"
+        f"<strong>{fmt_num(k.get('kg_stock_entrada', 0))} kg</strong></div>"
+        f"<div><span class='intro-kpi-label'>Merma</span>"
+        f"<strong>{fmt_num(k.get('kg_merma', 0))} kg</strong> "
+        f"({fmt_pct(k.get('pct_merma'))})</div>"
+        "</div>"
+        "</section>"
+        "<p class='intro-hint muted'>"
+        "Use las pestañas superiores para navegar. El botón "
+        "<strong>Exportar todo en Excel</strong> genera un libro con las cinco tablas principales."
+        "</p>"
+        "</article>"
+    )
+
 
 def build_premisa_entrada_html() -> str:
     items = "".join(f"<li>{html.escape(rule)}</li>" for rule in PREMISA_ENTRADA_REGLAS)
+    procesada_items = "".join(f"<li>{html.escape(rule)}</li>" for rule in PREMISA_PROCESADA)
     salida_items = "".join(f"<li>{html.escape(rule)}</li>" for rule in PREMISA_SALIDA_REGLAS)
     stock_merma_items = "".join(
         f"<li>{html.escape(rule)}</li>" for rule in PREMISA_STOCK_MERMA_REGLAS
@@ -623,16 +723,19 @@ def build_premisa_entrada_html() -> str:
     bc_items = "".join(f"<li>{html.escape(rule)}</li>" for rule in PREMISA_BC_PEDIDO_REGLAS)
     return (
         "<section class='premisa-box'>"
-        "<h3 class='premisa-head'>Premisa de entradas TINA</h3>"
+        "<h3 class='premisa-head'>Premisa 1 — Entradas TINA</h3>"
         f"<ul class='premisa-list'>{items}</ul>"
-        f"<p class='premisa-note'>{html.escape(PREMISA_TINA_PROCESADA)}</p>"
-        "<h3 class='premisa-head'>Premisa de salidas CAJA</h3>"
+        "<h3 class='premisa-head'>Premisa 2 — Tinas procesadas</h3>"
+        f"<ul class='premisa-list'>{procesada_items}</ul>"
+        "<h3 class='premisa-head'>Premisa 3 — Salidas CAJA</h3>"
         f"<ul class='premisa-list'>{salida_items}</ul>"
-        "<h3 class='premisa-head'>Premisa stock / merma (balance de masa)</h3>"
+        "<h3 class='premisa-head'>Premisas 4 y 5 — Stock de tinas y merma</h3>"
         f"<ul class='premisa-list'>{stock_merma_items}</ul>"
-        "<h3 class='premisa-head'>Premisa cruce BC (salidas con/sin pedido)</h3>"
+        "<h3 class='premisa-head'>Premisa 6 — Cruce BC (pedidos)</h3>"
         f"<ul class='premisa-list'>{bc_items}</ul>"
         "<p class='premisa-note muted'>Documento canon: PREMISAS.md</p>"
+        f"<p class='premisa-note nota-alerta-vap-inline'><strong>{html.escape(NOTA_ALERTA_VAP_TITULO)}:</strong> "
+        f"{html.escape(NOTA_ALERTA_VAP)}</p>"
         "</section>"
     )
 
@@ -646,17 +749,17 @@ def fetch_innova_salidas_lotes(
     params = (start.isoformat(), end.isoformat())
     query = f"""
     SELECT
-      CAST(p.regtime AS date) AS fecha,
+      CAST(p.prday AS date) AS fecha,
       {SQL_INNOVA_LOT} AS lot,
       SUM(CAST(p.weight AS float)) AS kg,
       COUNT(*) AS packs
     FROM dbo.proc_packs p
     JOIN dbo.proc_materials m ON m.material = p.material
-    WHERE p.regtime >= %s
-      AND p.regtime < DATEADD(day, 1, %s)
-      AND {SQL_LEGACY_ES_SALIDA}
+    WHERE p.prday >= %s
+      AND p.prday < DATEADD(day, 1, %s)
+      AND {SQL_SALIDA_CAJA}
       AND NULLIF(LTRIM(RTRIM({SQL_INNOVA_LOT})), '') IS NOT NULL
-    GROUP BY CAST(p.regtime AS date), {SQL_INNOVA_LOT}
+    GROUP BY CAST(p.prday AS date), {SQL_INNOVA_LOT}
     ORDER BY fecha, lot;
     """
     return fetch_rows(cursor, query, params)
@@ -723,6 +826,36 @@ def fetch_bc_salidas_pedido(
     ORDER BY lot;
     """
     by_lot = fetch_rows(cursor, q_lotes, params)
+    q_lotes_pedido = f"""
+    WITH doc_order AS (
+      SELECT
+        ssl.[Document No.] AS document_no,
+        MAX(NULLIF(LTRIM(RTRIM(ssl.[Order No.])), '')) AS [Order No.]
+      FROM bc.[Sales Shipment Line] ssl
+      WHERE ssl.[Posting Date] >= %s
+        AND ssl.[Posting Date] < DATEADD(day, 1, %s)
+      GROUP BY ssl.[Document No.]
+    )
+    SELECT
+      CAST(ile.[Lot No.] AS varchar(50)) AS lot,
+      NULLIF(LTRIM(RTRIM(sl.[Order No.])), '') AS order_no,
+      SUM(ABS(CAST(ile.[Quantity] AS float))) AS qty,
+      SUM(ABS(CAST(ile.[Kilos] AS float))) AS kg,
+      MIN(CAST(ile.[Posting Date] AS date)) AS posting_date_min,
+      MAX(CAST(ile.[Posting Date] AS date)) AS posting_date_max,
+      COUNT(*) AS lineas_ile
+    FROM bc.[Item Ledger Entry] ile
+    LEFT JOIN doc_order sl ON sl.document_no = ile.[Document No.]
+    WHERE ile.[Posting Date] >= %s
+      AND ile.[Posting Date] < DATEADD(day, 1, %s)
+      AND {SQL_BC_ILE_SALE}
+      AND NULLIF(LTRIM(RTRIM(ile.[Lot No.])), '') IS NOT NULL
+    GROUP BY
+      CAST(ile.[Lot No.] AS varchar(50)),
+      NULLIF(LTRIM(RTRIM(sl.[Order No.])), '')
+    ORDER BY lot, order_no;
+    """
+    by_lot_order = fetch_rows(cursor, q_lotes_pedido, params)
     totals = {
         "lotes_bc": len(by_lot),
         "qty_total": sum(to_float(r["qty"]) for r in by_lot),
@@ -735,6 +868,7 @@ def fetch_bc_salidas_pedido(
     }
     return {
         "by_lot": by_lot,
+        "by_lot_order": by_lot_order,
         "totals": totals,
         "sql_trace": {
             "view_or_tables": [
@@ -744,6 +878,7 @@ def fetch_bc_salidas_pedido(
             "params": {"start": start.isoformat(), "end": end.isoformat()},
             "queries": [
                 {"name": "bc_lotes_salida_ile", "query": q_lotes.strip()},
+                {"name": "bc_lotes_pedido_ile", "query": q_lotes_pedido.strip()},
             ],
         },
     }
@@ -759,6 +894,10 @@ def attach_bc_cruce_to_report(
     innova_lotes: list[dict[str, Any]],
 ) -> None:
     bc_by_lot = {str(row["lot"]).strip(): row for row in bc_data["by_lot"]}
+    bc_orders_by_lot: dict[str, list[dict[str, Any]]] = {}
+    for row in bc_data.get("by_lot_order", []):
+        lot_key = str(row["lot"]).strip()
+        bc_orders_by_lot.setdefault(lot_key, []).append(row)
     innova_by_date: dict[str, list[dict[str, Any]]] = {}
     for row in innova_lotes:
         key = row["fecha"].isoformat()
@@ -772,6 +911,7 @@ def attach_bc_cruce_to_report(
     tot_qty_sin = 0.0
     tot_kg_con = 0.0
     tot_kg_sin = 0.0
+    bc_cruce_detalle: list[dict[str, Any]] = []
 
     for detalle_row in report_data["detalle_diario"]:
         date_key = parse_fecha_es(detalle_row["fecha"])
@@ -784,10 +924,49 @@ def attach_bc_cruce_to_report(
         qty_sin_pedido = 0.0
         kg_con_pedido = 0.0
         kg_sin_pedido = 0.0
+        lotes_detalle: list[dict[str, Any]] = []
 
         for lot_row in lotes_dia:
             lot_key = str(lot_row["lot"]).strip()
             bc_row = bc_by_lot.get(lot_key)
+            pedidos: list[dict[str, Any]] = []
+            if bc_row:
+                for order_row in bc_orders_by_lot.get(lot_key, []):
+                    order_no = str(order_row.get("order_no") or "").strip()
+                    pedidos.append(
+                        {
+                            "order_no": order_no,
+                            "order_label": order_no if order_no else "(sin pedido)",
+                            "qty": to_float(order_row["qty"]),
+                            "kg": to_float(order_row["kg"]),
+                            "posting_date_min": order_row.get("posting_date_min"),
+                            "posting_date_max": order_row.get("posting_date_max"),
+                        }
+                    )
+                if not pedidos:
+                    order_no = str(bc_row.get("order_no") or "").strip()
+                    pedidos.append(
+                        {
+                            "order_no": order_no,
+                            "order_label": order_no if order_no else "(sin pedido)",
+                            "qty": to_float(bc_row["qty"]),
+                            "kg": to_float(bc_row["kg"]),
+                            "posting_date_min": None,
+                            "posting_date_max": None,
+                        }
+                    )
+
+            lotes_detalle.append(
+                {
+                    "lot": lot_key,
+                    "kg_innova": to_float(lot_row["kg"]),
+                    "packs": int(lot_row.get("packs") or 0),
+                    "enlazado": bc_row is not None,
+                    "kg_bc_total": to_float(bc_row["kg"]) if bc_row else 0.0,
+                    "pedidos": pedidos,
+                }
+            )
+
             if not bc_row:
                 continue
             lotes_enlazados += 1
@@ -812,6 +991,35 @@ def attach_bc_cruce_to_report(
             }
         )
 
+        if not any(
+            (
+                detalle_row.get("kg_salida_no_tina"),
+                lotes_innova,
+                lotes_enlazados,
+                qty_con_pedido,
+                qty_sin_pedido,
+            )
+        ):
+            continue
+
+        bc_cruce_detalle.append(
+            {
+                "fecha": detalle_row["fecha"],
+                "fecha_id": date_key.replace("-", ""),
+                "kg_salida_no_tina": detalle_row.get("kg_salida_no_tina", 0),
+                "bc_lotes_innova": lotes_innova,
+                "bc_lotes_enlazados": lotes_enlazados,
+                "bc_kg_innova_enlazado": kg_innova_enlazado,
+                "bc_kg_bc_enlazado": kg_bc_enlazado,
+                "bc_kg_diferencia_enlazado": kg_innova_enlazado - kg_bc_enlazado,
+                "bc_qty_con_pedido": qty_con_pedido,
+                "bc_qty_sin_pedido": qty_sin_pedido,
+                "bc_kg_con_pedido": kg_con_pedido,
+                "bc_kg_sin_pedido": kg_sin_pedido,
+                "lotes": lotes_detalle,
+            }
+        )
+
         tot_lotes_innova += lotes_innova
         tot_lotes_enlazados += lotes_enlazados
         tot_kg_innova_enlazado += kg_innova_enlazado
@@ -823,6 +1031,7 @@ def attach_bc_cruce_to_report(
 
     totals = bc_data["totals"]
     report_data["bc_cruce"] = bc_data
+    report_data["bc_cruce_detalle"] = bc_cruce_detalle
     report_data["kpis"].update(
         {
             "bc_lotes_innova": tot_lotes_innova,
@@ -854,15 +1063,14 @@ def attach_bc_cruce_to_report(
 def build_source_definition(data_source: str) -> str:
     if data_source == "vw_stolt_despesque":
         return (
-            "Fuente: dbo.vw_stolt por fdespesque. "
+            "Fuente alternativa: dbo.vw_stolt por fdespesque (no alineada a premisas 1-6). "
             + PREMISA_SALIDA
-            + " Stock sin procesar = arrastre acumulado (Entradas TINA − TINA procesada)."
         )
     return (
-        "Entradas/salidas CAJA por proc_packs.regtime. TINA procesada desde proc_matxacts; "
-        "fecha diaria por proc_packs.regtime de la TINA (proc_matxacts.pack = proc_packs.id). "
+        "Premisas 1-6: fecha prday. Entradas (rtype 1,12), procesadas (matxacts xactpath 1), "
+        "salidas CAJA (rtype 1), stock tinas (rtype 1), merma por balance. "
         + PREMISA_SALIDA
-        + " Stock/arrastre por fdespesque (vw_stolt)."
+        + " Cruce BC premisa 6 por lote (number = Lot No.)."
     )
 
 
@@ -995,48 +1203,61 @@ def build_report_data(
             "movs_consumo": row["movs_consumo"],
           }
         )
+      stocks = []
     else:
       q_entrada = f"""
       SELECT
-        CAST(p.regtime AS date) AS fecha,
+        CAST(p.prday AS date) AS fecha,
         SUM(CAST(p.weight AS float)) AS kg_entrada_tina,
         COUNT(*) AS packs_entrada
       FROM dbo.proc_packs p
       JOIN dbo.proc_materials m ON m.material = p.material
-      WHERE p.regtime >= %s
-        AND p.regtime < DATEADD(day, 1, %s)
-        AND {SQL_LEGACY_ES_ENTRADA}
-      GROUP BY CAST(p.regtime AS date)
+      WHERE p.prday >= %s
+        AND p.prday < DATEADD(day, 1, %s)
+        AND {SQL_ENTRADA_TINA}
+      GROUP BY CAST(p.prday AS date)
       ORDER BY fecha;
       """
 
       q_salida = f"""
       SELECT
-        CAST(p.regtime AS date) AS fecha,
+        CAST(p.prday AS date) AS fecha,
         SUM(CAST(p.weight AS float)) AS kg_salida_no_tina,
         COUNT(*) AS packs_salida
       FROM dbo.proc_packs p
       JOIN dbo.proc_materials m ON m.material = p.material
-      WHERE p.regtime >= %s
-        AND p.regtime < DATEADD(day, 1, %s)
-        AND {SQL_LEGACY_ES_SALIDA}
-      GROUP BY CAST(p.regtime AS date)
+      WHERE p.prday >= %s
+        AND p.prday < DATEADD(day, 1, %s)
+        AND {SQL_SALIDA_CAJA}
+      GROUP BY CAST(p.prday AS date)
       ORDER BY fecha;
       """
 
-      q_consumo = """
+      q_consumo = f"""
       SELECT
-        CAST(p_tina.regtime AS date) AS fecha,
-        SUM(CAST(x.weight AS float)) AS kg_consumo_tina,
+        CAST(pk.prday AS date) AS fecha,
+        SUM(CAST(pk.weight AS float)) AS kg_consumo_tina,
         COUNT(*) AS movs_consumo
-      FROM dbo.proc_matxacts x
-      JOIN dbo.proc_packs p_tina ON p_tina.id = x.pack
-      JOIN dbo.proc_materials m ON m.material = x.material
-      WHERE p_tina.regtime >= %s
-        AND p_tina.regtime < DATEADD(day, 1, %s)
-        AND x.xactpath = 1
-        AND LOWER(m.name) LIKE '%tina%'
-      GROUP BY CAST(p_tina.regtime AS date)
+      FROM dbo.proc_matxacts pk
+      JOIN dbo.proc_materials mat ON mat.material = pk.material
+      WHERE pk.prday >= %s
+        AND pk.prday < DATEADD(day, 1, %s)
+        AND {SQL_PROCESADA_TINA}
+      GROUP BY CAST(pk.prday AS date)
+      ORDER BY fecha;
+      """
+
+      q_stock = f"""
+      SELECT
+        CAST(pk.prday AS date) AS fecha,
+        SUM(CAST(pk.nregs AS float)) AS nregs_stock_tina,
+        SUM(CAST(pk.weight AS float)) AS kg_stock_tina
+      FROM dbo.proc_packs pk
+      JOIN dbo.proc_materials mat ON mat.material = pk.material
+      WHERE pk.prday >= %s
+        AND pk.prday < DATEADD(day, 1, %s)
+        AND {SQL_STOCK_TINA}
+      GROUP BY CAST(pk.prday AS date)
       ORDER BY fecha;
       """
 
@@ -1047,9 +1268,9 @@ def build_report_data(
         SUM(CAST(p.weight AS float)) AS kg
       FROM dbo.proc_packs p
       JOIN dbo.proc_materials m ON m.material = p.material
-      WHERE p.regtime >= %s
-        AND p.regtime < DATEADD(day, 1, %s)
-        AND {SQL_LEGACY_ES_ENTRADA}
+      WHERE p.prday >= %s
+        AND p.prday < DATEADD(day, 1, %s)
+        AND {SQL_ENTRADA_TINA}
       GROUP BY m.material, m.name
       ORDER BY kg DESC;
       """
@@ -1061,26 +1282,28 @@ def build_report_data(
         SUM(CAST(p.weight AS float)) AS kg
       FROM dbo.proc_packs p
       JOIN dbo.proc_materials m ON m.material = p.material
-      WHERE p.regtime >= %s
-        AND p.regtime < DATEADD(day, 1, %s)
-        AND {SQL_LEGACY_ES_SALIDA}
+      WHERE p.prday >= %s
+        AND p.prday < DATEADD(day, 1, %s)
+        AND {SQL_SALIDA_CAJA}
       GROUP BY m.material, m.name
       ORDER BY kg DESC;
       """
 
       sql_trace.extend(
         [
-          {"name": "entrada_legacy", "query": q_entrada.strip()},
-          {"name": "salida_legacy", "query": q_salida.strip()},
-          {"name": "consumo_legacy", "query": q_consumo.strip()},
-          {"name": "top_entrada_legacy", "query": q_top_entrada.strip()},
-          {"name": "top_salida_legacy", "query": q_top_salida.strip()},
+          {"name": "entrada_prday", "query": q_entrada.strip()},
+          {"name": "salida_prday", "query": q_salida.strip()},
+          {"name": "procesada_prday", "query": q_consumo.strip()},
+          {"name": "stock_tinas_prday", "query": q_stock.strip()},
+          {"name": "top_entrada_prday", "query": q_top_entrada.strip()},
+          {"name": "top_salida_prday", "query": q_top_salida.strip()},
         ]
       )
 
       entradas = fetch_rows(cursor, q_entrada, params)
       salidas = fetch_rows(cursor, q_salida, params)
       consumos = fetch_rows(cursor, q_consumo, params)
+      stocks = fetch_rows(cursor, q_stock, params)
       top_entradas = fetch_rows(cursor, q_top_entrada, params)
       top_salidas = fetch_rows(cursor, q_top_salida, params)
 
@@ -1097,6 +1320,8 @@ def build_report_data(
             "packs_salida": 0,
             "kg_consumo_tina": 0.0,
             "movs_consumo": 0,
+            "nregs_stock_tina": 0,
+            "kg_stock_tina": 0.0,
             "kg_stock_balance": 0.0,
             "kg_merma": 0.0,
             "bc_qty_con_pedido": 0.0,
@@ -1128,45 +1353,16 @@ def build_report_data(
         by_date[key]["kg_consumo_tina"] = to_float(row["kg_consumo_tina"])
         by_date[key]["movs_consumo"] = int(row["movs_consumo"] or 0)
 
-    stock_by_despesque: dict[str, dict[str, float]] = {}
-    if data_source == "legacy":
-      q_stock_despesque = f"""
-      SELECT
-        CAST(v.fdespesque AS date) AS fecha,
-        SUM(
-          CASE
-            WHEN {SQL_VW_STOLT_ES_ENTRADA}
-            THEN CAST(v.peso AS float)
-            ELSE 0.0
-          END
-        ) AS kg_entrada_tina_stock,
-        SUM(
-          CASE
-            WHEN {SQL_VW_STOLT_ES_SALIDA}
-            THEN CAST(v.peso AS float)
-            ELSE 0.0
-          END
-        ) AS kg_cajas_stock
-      FROM dbo.vw_stolt v
-      JOIN dbo.proc_materials m ON m.material = v.material
-      WHERE v.fdespesque >= %s
-        AND v.fdespesque < DATEADD(day, 1, %s)
-      GROUP BY CAST(v.fdespesque AS date)
-      ORDER BY fecha;
-      """
-      sql_trace.append({"name": "stock_arrastre_despesque", "query": q_stock_despesque.strip()})
-      stock_rows = fetch_rows(cursor, q_stock_despesque, params)
-      for row in stock_rows:
+    if data_source != "vw_stolt_despesque":
+      for row in stocks:
         key = row["fecha"].isoformat()
-        stock_by_despesque[key] = {
-          "kg_entrada_tina_stock": to_float(row["kg_entrada_tina_stock"]),
-          "kg_cajas_stock": to_float(row["kg_cajas_stock"]),
-        }
+        by_date[key]["nregs_stock_tina"] = int(row["nregs_stock_tina"] or 0)
+        by_date[key]["kg_stock_tina"] = to_float(row["kg_stock_tina"])
 
     detalle = []
     acumulado_dif = 0.0
     acumulado_balance = 0.0
-    acumulado_stock_despesque = 0.0
+    acumulado_stock_tinas = 0.0
 
     for key in sorted(by_date.keys()):
         entry = by_date[key]
@@ -1176,16 +1372,8 @@ def build_report_data(
         acumulado_balance += balance
         pct_dif = (dif / entry["kg_entrada_tina"] * 100.0) if entry["kg_entrada_tina"] else None
 
-        stock_row = stock_by_despesque.get(
-          key,
-          {"kg_entrada_tina_stock": 0.0, "kg_cajas_stock": 0.0},
-        )
-        stock_dif = stock_row["kg_entrada_tina_stock"] - stock_row["kg_cajas_stock"]
-        if data_source == "legacy":
-          acumulado_stock_despesque += stock_dif
-          stock_sin_procesar = acumulado_stock_despesque
-        else:
-          stock_sin_procesar = acumulado_dif
+        acumulado_stock_tinas += entry.get("kg_stock_tina", 0.0)
+        stock_sin_procesar = acumulado_stock_tinas
 
         detalle.append(
             {
@@ -1195,10 +1383,9 @@ def build_report_data(
                 "balance_entrada_salida_kg": balance,
                 "acumulado_balance_kg": acumulado_balance,
                 "porcentaje_diferencia": pct_dif,
-                "kg_entrada_tina_stock": stock_row["kg_entrada_tina_stock"],
-                "kg_cajas_stock": stock_row["kg_cajas_stock"],
-                "diferencia_stock_kg": stock_dif,
-                # En legacy: stock/arrastre por despesque. En vw_stolt: por el propio detalle diario.
+                "kg_entrada_tina_stock": 0.0,
+                "kg_cajas_stock": 0.0,
+                "diferencia_stock_kg": 0.0,
                 "stock_sin_procesar_kg": stock_sin_procesar,
             }
         )
@@ -1206,6 +1393,7 @@ def build_report_data(
     tot_entrada = sum(r["kg_entrada_tina"] for r in detalle)
     tot_salida = sum(r["kg_salida_no_tina"] for r in detalle)
     tot_consumo = sum(r["kg_consumo_tina"] for r in detalle)
+    tot_stock_tinas = sum(r.get("kg_stock_tina", 0) for r in detalle)
     tot_dif = sum(r["diferencia_kg"] for r in detalle)
     tot_balance = sum(r["balance_entrada_salida_kg"] for r in detalle)
     tot_stock_fin = detalle[-1]["stock_sin_procesar_kg"] if detalle else 0.0
@@ -1214,6 +1402,7 @@ def build_report_data(
         "kg_entrada_tina": tot_entrada,
         "kg_salida_no_tina": tot_salida,
         "kg_consumo_tina": tot_consumo,
+        "kg_stock_tinas": tot_stock_tinas,
         "kg_diferencia": tot_dif,
         "kg_balance_entrada_salida": tot_balance,
         "kg_stock_sin_procesar_fin": tot_stock_fin,
@@ -1246,7 +1435,6 @@ def build_report_data(
           "data_source": data_source,
           "view_or_tables": (
             ["dbo.vw_stolt"] if data_source == "vw_stolt_despesque" else [
-              "dbo.vw_stolt",
               "dbo.proc_packs",
               "dbo.proc_matxacts",
               "dbo.proc_materials",
@@ -1315,32 +1503,110 @@ def build_stock_merma_table_rows(detalle: list[dict[str, Any]]) -> str:
     return "\n".join(rows)
 
 
-def build_bc_cruce_table_rows(detalle: list[dict[str, Any]]) -> str:
-    rows = []
-    for r in detalle:
-        if not any(
-            (
-                r.get("kg_salida_no_tina"),
-                r.get("bc_lotes_innova"),
-                r.get("bc_lotes_enlazados"),
-                r.get("bc_qty_con_pedido"),
-                r.get("bc_qty_sin_pedido"),
+def _format_bc_posting_range(pedido: dict[str, Any]) -> str:
+    date_min = pedido.get("posting_date_min")
+    date_max = pedido.get("posting_date_max")
+    if not date_min and not date_max:
+        return "—"
+    if date_min and date_max and date_min != date_max:
+        return f"{date_min} — {date_max}"
+    return str(date_min or date_max)
+
+
+def build_bc_lot_detail_table(lotes: list[dict[str, Any]]) -> str:
+    body_rows: list[str] = []
+    for lot in lotes:
+        pedidos = lot.get("pedidos") or []
+        if not lot.get("enlazado"):
+            body_rows.append(
+                "<tr class='bc-lot-sin-enlace'>"
+                f"<td><code>{html.escape(str(lot['lot']))}</code></td>"
+                f"<td class='num'>{fmt_num(lot.get('kg_innova', 0))}</td>"
+                f"<td class='num'>{int(lot.get('packs', 0))}</td>"
+                "<td colspan='5'><em>Sin enlace BC en el periodo</em></td>"
+                "</tr>"
             )
-        ):
             continue
+        if not pedidos:
+            body_rows.append(
+                "<tr>"
+                f"<td><code>{html.escape(str(lot['lot']))}</code></td>"
+                f"<td class='num'>{fmt_num(lot.get('kg_innova', 0))}</td>"
+                f"<td class='num'>{int(lot.get('packs', 0))}</td>"
+                "<td><em>(sin pedido)</em></td>"
+                f"<td class='num'>{fmt_num(lot.get('kg_bc_total', 0))}</td>"
+                "<td class='num'>—</td>"
+                "<td>—</td>"
+                "<td>—</td>"
+                "</tr>"
+            )
+            continue
+        for pedido in pedidos:
+            order_label = html.escape(str(pedido.get("order_label", "(sin pedido)")))
+            row_class = "bc-lot-sin-pedido" if not pedido.get("order_no") else ""
+            body_rows.append(
+                f"<tr class='{row_class}'>"
+                f"<td><code>{html.escape(str(lot['lot']))}</code></td>"
+                f"<td class='num'>{fmt_num(lot.get('kg_innova', 0))}</td>"
+                f"<td class='num'>{int(lot.get('packs', 0))}</td>"
+                f"<td><strong>{order_label}</strong></td>"
+                f"<td class='num'>{fmt_num(pedido.get('kg', 0))}</td>"
+                f"<td class='num'>{fmt_num(pedido.get('qty', 0))}</td>"
+                f"<td>{html.escape(_format_bc_posting_range(pedido))}</td>"
+                f"<td class='num'>{fmt_num(lot.get('kg_bc_total', 0))}</td>"
+                "</tr>"
+            )
+    if not body_rows:
+        return "<p class='muted'>Sin lotes con salida en esta fecha.</p>"
+    return (
+        "<table class='bc-lot-table'>"
+        "<thead><tr>"
+        "<th>Lote (number / Lot No.)</th>"
+        "<th class='num'>Kg Innova</th>"
+        "<th class='num'>Nº cajas</th>"
+        "<th>Pedido BC ([Order No.])</th>"
+        "<th class='num'>Kg BC (pedido)</th>"
+        "<th class='num'>Qty BC</th>"
+        "<th>Fecha contab. BC</th>"
+        "<th class='num'>Kg BC lote (total)</th>"
+        "</tr></thead><tbody>"
+        + "".join(body_rows)
+        + "</tbody></table>"
+    )
+
+
+def build_bc_cruce_table_rows(bc_cruce_detalle: list[dict[str, Any]]) -> str:
+    rows: list[str] = []
+    for day in bc_cruce_detalle:
+        fecha_id = html.escape(str(day.get("fecha_id", "")))
+        lotes = day.get("lotes") or []
+        lot_count = len(lotes)
+        detail_id = f"bc-detail-{fecha_id}"
         rows.append(
-            "<tr>"
-            f"<td>{html.escape(r['fecha'])}</td>"
-            f"<td class='num'>{fmt_num(r['kg_salida_no_tina'])}</td>"
-            f"<td class='num'>{int(r.get('bc_lotes_innova', 0))}</td>"
-            f"<td class='num'>{int(r.get('bc_lotes_enlazados', 0))}</td>"
-            f"<td class='num'>{fmt_num(r.get('bc_kg_innova_enlazado', 0))}</td>"
-            f"<td class='num'>{fmt_num(r.get('bc_kg_bc_enlazado', 0))}</td>"
-            f"<td class='num'>{fmt_num(r.get('bc_kg_diferencia_enlazado', 0))}</td>"
-            f"<td class='num'>{fmt_num(r.get('bc_qty_con_pedido', 0))}</td>"
-            f"<td class='num'>{fmt_num(r.get('bc_qty_sin_pedido', 0))}</td>"
-            f"<td class='num'>{fmt_num(r.get('bc_kg_con_pedido', 0))}</td>"
-            f"<td class='num'>{fmt_num(r.get('bc_kg_sin_pedido', 0))}</td>"
+            "<tr class='bc-date-row'>"
+            f"<td class='bc-date-cell'>"
+            f"<button type='button' class='bc-toggle' aria-expanded='false' "
+            f"aria-controls='{detail_id}' title='Ver lotes y pedidos'>▸</button> "
+            f"{html.escape(day['fecha'])}"
+            f"<span class='bc-date-meta muted'> ({lot_count} lotes)</span>"
+            "</td>"
+            f"<td class='num'>{fmt_num(day.get('kg_salida_no_tina', 0))}</td>"
+            f"<td class='num'>{int(day.get('bc_lotes_innova', 0))}</td>"
+            f"<td class='num'>{int(day.get('bc_lotes_enlazados', 0))}</td>"
+            f"<td class='num'>{fmt_num(day.get('bc_kg_innova_enlazado', 0))}</td>"
+            f"<td class='num'>{fmt_num(day.get('bc_kg_bc_enlazado', 0))}</td>"
+            f"<td class='num'>{fmt_num(day.get('bc_kg_diferencia_enlazado', 0))}</td>"
+            f"<td class='num'>{fmt_num(day.get('bc_qty_con_pedido', 0))}</td>"
+            f"<td class='num'>{fmt_num(day.get('bc_qty_sin_pedido', 0))}</td>"
+            f"<td class='num'>{fmt_num(day.get('bc_kg_con_pedido', 0))}</td>"
+            f"<td class='num'>{fmt_num(day.get('bc_kg_sin_pedido', 0))}</td>"
+            "</tr>"
+        )
+        rows.append(
+            f"<tr class='bc-detail-row' id='{detail_id}' hidden>"
+            "<td colspan='11'>"
+            f"{build_bc_lot_detail_table(lotes)}"
+            "</td>"
             "</tr>"
         )
     return "\n".join(rows)
@@ -1378,13 +1644,14 @@ def render_html(
     salida = [round(r["kg_salida_no_tina"], 2) for r in detalle]
     diferencia = [round(r["diferencia_kg"], 2) for r in detalle]
     acumulado = [round(r["acumulado_diferencia_kg"], 2) for r in detalle]
-    stock_entrada_chart = [round(r.get("kg_stock_entrada", 0), 2) for r in detalle]
+    stock_entrada_chart = [round(r.get("kg_stock_entrada", r.get("kg_stock_tina", 0)), 2) for r in detalle]
     stock_inventario_chart = [round(r.get("kg_stock_inventario", 0), 2) for r in detalle]
     merma = [round(r.get("kg_merma", 0), 2) for r in detalle]
 
     detail_rows_html = build_table_rows(detalle)
     stock_merma_rows_html = build_stock_merma_table_rows(detalle)
-    bc_cruce_rows_html = build_bc_cruce_table_rows(detalle)
+    bc_cruce_detalle = data.get("bc_cruce_detalle", [])
+    bc_cruce_rows_html = build_bc_cruce_table_rows(bc_cruce_detalle)
     bc_loaded = bool(data.get("bc_cruce"))
     bc_note = (
         "Enlace por proc_packs.number = BC Item Ledger Entry [Lot No.]. Pedido desde Sales Shipment Line."
@@ -1401,8 +1668,9 @@ def render_html(
           </button>
         </div>
         <p class="muted" style="margin-top:0;">
-          Salidas Innova agrupadas por fecha de regtime. Cada pack de salida enlaza con BC por
-          <strong>proc_packs.number</strong> = <strong>[Lot No.]</strong> (codigo de lote/caja).
+          Salidas Innova agrupadas por fecha prday (premisa 3). Pulse <strong>▸</strong> en una fecha
+          para desplegar lotes (<strong>proc_packs.number</strong>) y pedidos BC
+          (<strong>[Order No.]</strong>) enlazados por <strong>[Lot No.]</strong>.
           Con pedido = [Order No.] informado en el albaran; sin pedido = vacio.
           Unidades BC = Quantity; kilos BC = [Kilos] en Item Ledger Entry (valor absoluto).
           {html.escape(bc_note)}
@@ -1452,6 +1720,8 @@ def render_html(
     stock_cards_html = ""
     source_definition = build_source_definition(data_source)
     premisa_entrada_html = build_premisa_entrada_html()
+    intro_html = build_report_intro_html(start, end, k, source_definition, bc_loaded)
+    nota_alerta_vap_html = build_nota_alerta_vap_html()
     trace_tables = ", ".join(sql_trace.get("view_or_tables", []))
     trace_params = sql_trace.get("params", {})
     trace_query_items = []
@@ -1492,7 +1762,7 @@ def render_html(
       stock_cards_html += (
         f"<article class='card'><div class='kpi-title'>Merma (kg)</div>"
         f"<div class='kpi-value'>{fmt_num(k['kg_merma'])}</div>"
-        f"<div class='kpi-sub'>Entradas - Salidas - Stock de entrada{pct_txt}</div></article>"
+        f"<div class='kpi-sub'>Entradas - Salidas - Stock de tinas{pct_txt}</div></article>"
       )
     if k.get("arrastre_activo"):
       stock_cards_html += (
@@ -1742,6 +2012,32 @@ def render_html(
       font-size: 13px;
       color: #334155;
     }}
+    .nota-alerta-vap-inline {{
+      margin-top: 12px;
+      padding: 10px 12px;
+      border-left: 4px solid #b45309;
+      background: #fffbeb;
+      color: #78350f;
+    }}
+    .nota-alerta-vap {{
+      margin: 24px 0 8px 0;
+      padding: 14px 16px;
+      border: 1px solid #f59e0b;
+      border-radius: 12px;
+      background: #fffbeb;
+    }}
+    .nota-alerta-vap-titulo {{
+      margin: 0 0 6px 0;
+      font-size: 14px;
+      font-weight: 700;
+      color: #92400e;
+    }}
+    .nota-alerta-vap-texto {{
+      margin: 0;
+      font-size: 13px;
+      line-height: 1.45;
+      color: #78350f;
+    }}
     .trace-box {{
       margin-top: 18px;
       background: var(--card);
@@ -1835,7 +2131,218 @@ def render_html(
       width: 100% !important;
       height: 100% !important;
     }}
+    .tabs-bar {{
+      margin-top: 18px;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 8px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      position: sticky;
+      top: 8px;
+      z-index: 100;
+      box-shadow: 0 4px 12px rgba(2, 6, 23, 0.06);
+    }}
+    .tab-btn {{
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--muted);
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s, border-color 0.15s;
+    }}
+    .tab-btn:hover {{
+      background: #f1f5f9;
+      color: var(--ink);
+    }}
+    .tab-btn.active {{
+      background: #e8f6ee;
+      color: #0f5132;
+      border-color: #b8e0cf;
+    }}
+    .tab-btn-debug {{
+      margin-left: auto;
+      color: #64748b;
+      font-size: 12px;
+      font-weight: 600;
+    }}
+    .tab-btn-debug:hover {{
+      background: #f1f5f9;
+      color: #475569;
+    }}
+    .tab-btn-debug.active {{
+      background: #f1f5f9;
+      color: #334155;
+      border-color: #cbd5e1;
+    }}
+    .debug-panel-intro {{
+      margin: 0 0 14px 0;
+      padding: 10px 12px;
+      border: 1px dashed #cbd5e1;
+      border-radius: 10px;
+      background: #f8fafc;
+      font-size: 13px;
+      color: #64748b;
+    }}
+    .intro-debug-note {{
+      margin: 10px 0 0 0;
+      font-size: 12px;
+    }}
+    .bc-date-cell {{
+      white-space: nowrap;
+    }}
+    .bc-date-meta {{
+      font-size: 12px;
+    }}
+    .bc-toggle {{
+      border: 1px solid var(--line);
+      background: #ffffff;
+      color: var(--brand);
+      border-radius: 6px;
+      width: 28px;
+      height: 28px;
+      margin-right: 6px;
+      cursor: pointer;
+      font-size: 14px;
+      line-height: 1;
+      vertical-align: middle;
+    }}
+    .bc-toggle:hover {{
+      background: #f0faf6;
+    }}
+    .bc-toggle[aria-expanded='true'] {{
+      background: #e8f6ee;
+      border-color: #b8e0cf;
+    }}
+    .bc-date-row {{
+      background: #ffffff;
+    }}
+    .bc-detail-row td {{
+      background: #f8fafc;
+      padding: 8px 10px 14px 42px;
+    }}
+    .bc-lot-table {{
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      overflow: hidden;
+      background: #ffffff;
+    }}
+    .bc-lot-table th,
+    .bc-lot-table td {{
+      font-size: 12px;
+      padding: 8px 10px;
+    }}
+    .bc-lot-table th {{
+      background: #eef6ff;
+    }}
+    .bc-lot-sin-enlace td {{
+      color: #64748b;
+      background: #fff7ed;
+    }}
+    .bc-lot-sin-pedido td {{
+      background: #fffbeb;
+    }}
+    .tab-panels {{
+      margin-top: 14px;
+    }}
+    .tab-panel {{
+      display: none;
+      animation: tabFade 0.2s ease;
+    }}
+    .tab-panel.active {{
+      display: block;
+    }}
+    @keyframes tabFade {{
+      from {{ opacity: 0; transform: translateY(4px); }}
+      to {{ opacity: 1; transform: translateY(0); }}
+    }}
+    .intro-card {{
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 20px 22px;
+      box-shadow: 0 4px 12px rgba(2, 6, 23, 0.04);
+    }}
+    .intro-card h2 {{
+      margin: 0 0 10px 0;
+      font-size: 22px;
+      color: #0f5132;
+    }}
+    .intro-lead {{
+      margin: 0 0 16px 0;
+      font-size: 15px;
+      line-height: 1.55;
+      color: #334155;
+    }}
+    .intro-grid {{
+      display: grid;
+      grid-template-columns: repeat(2, minmax(280px, 1fr));
+      gap: 18px;
+      margin-bottom: 18px;
+    }}
+    .intro-grid h3,
+    .intro-snapshot h3 {{
+      margin: 0 0 8px 0;
+      font-size: 15px;
+      color: #0f766e;
+    }}
+    .intro-list {{
+      margin: 0;
+      padding-left: 20px;
+      font-size: 13px;
+      line-height: 1.55;
+      color: #334155;
+    }}
+    .intro-list li {{ margin: 5px 0; }}
+    .intro-snapshot {{
+      border-top: 1px solid var(--line);
+      padding-top: 16px;
+      margin-bottom: 12px;
+    }}
+    .intro-kpis {{
+      display: grid;
+      grid-template-columns: repeat(4, minmax(140px, 1fr));
+      gap: 10px;
+      margin-top: 12px;
+    }}
+    .intro-kpis div {{
+      background: #f8fafc;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px 12px;
+    }}
+    .intro-kpi-label {{
+      display: block;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+      margin-bottom: 4px;
+    }}
+    .intro-hint {{
+      margin: 0;
+      font-size: 13px;
+    }}
+    .tab-panel .tables {{
+      grid-template-columns: 1fr;
+      margin-top: 0;
+    }}
+    .tab-panel .grid,
+    .tab-panel .charts {{
+      margin-top: 0;
+    }}
+    .tab-panel .chart-card table {{
+      display: block;
+      overflow-x: auto;
+    }}
     @media (max-width: 1080px) {{
+      .intro-grid, .intro-kpis {{ grid-template-columns: 1fr; }}
       .grid {{ grid-template-columns: repeat(2, minmax(220px, 1fr)); }}
       .charts, .tables {{ grid-template-columns: 1fr; }}
     }}
@@ -1863,166 +2370,207 @@ def render_html(
       <p class="muted">{html.escape(source_definition)}</p>
     </section>
 
-    {premisa_entrada_html}
+    <nav class="tabs-bar" role="tablist" aria-label="Capítulos del informe">
+      <button type="button" class="tab-btn active" role="tab" aria-selected="true" aria-controls="tab-intro" data-tab="tab-intro" id="tab-btn-intro">Introducción</button>
+      <button type="button" class="tab-btn" role="tab" aria-selected="false" aria-controls="tab-resumen" data-tab="tab-resumen" id="tab-btn-resumen">Resumen</button>
+      <button type="button" class="tab-btn" role="tab" aria-selected="false" aria-controls="tab-graficas" data-tab="tab-graficas" id="tab-btn-graficas">Gráficas</button>
+      <button type="button" class="tab-btn" role="tab" aria-selected="false" aria-controls="tab-detalle" data-tab="tab-detalle" id="tab-btn-detalle">Detalle diario</button>
+      <button type="button" class="tab-btn" role="tab" aria-selected="false" aria-controls="tab-balance" data-tab="tab-balance" id="tab-btn-balance">Balance</button>
+      <button type="button" class="tab-btn" role="tab" aria-selected="false" aria-controls="tab-bc" data-tab="tab-bc" id="tab-btn-bc">Cruce BC</button>
+      <button type="button" class="tab-btn" role="tab" aria-selected="false" aria-controls="tab-materiales" data-tab="tab-materiales" id="tab-btn-materiales">Materiales</button>
+      <button type="button" class="tab-btn tab-btn-debug" role="tab" aria-selected="false" aria-controls="tab-debug" data-tab="tab-debug" id="tab-btn-debug">Debug</button>
+    </nav>
 
-    <section class="grid">
-      <article class="card"><div class="kpi-title">Entradas TINA (kg)</div><div class="kpi-value">{fmt_num(k['kg_entrada_tina'])}</div><div class="kpi-sub">{k['packs_entrada']} Nº de Tinas</div></article>
-      <article class="card"><div class="kpi-title">TINA procesada (kg)</div><div class="kpi-value">{fmt_num(k['kg_consumo_tina'])}</div><div class="kpi-sub">{k['movs_consumo']} movimientos · entrada, no CAJA</div></article>
-      <article class="card"><div class="kpi-title">Salidas CAJA (kg)</div><div class="kpi-value">{fmt_num(k['kg_salida_no_tina'])}</div><div class="kpi-sub">{k['packs_salida']} packs · graders y basculas</div></article>
-      <article class="card"><div class="kpi-title">Stock de entrada (kg)</div><div class="kpi-value">{fmt_num(k.get('kg_stock_entrada', 0))}</div><div class="kpi-sub">Entradas TINA − TINA procesada · no todo se procesa</div></article>
-      <article class="card"><div class="kpi-title">Merma (kg)</div><div class="kpi-value">{fmt_num(k.get('kg_merma', 0))}</div><div class="kpi-sub">Entradas − Salidas − Stock entrada · {fmt_pct(k.get('pct_merma'))}</div></article>
-      <article class="card"><div class="kpi-title">Stock inventario (kg)</div><div class="kpi-value">{fmt_num(k.get('kg_stock_inventario', 0))}</div><div class="kpi-sub">Inventario total al cierre (con arrastre)</div></article>
-      <article class="card"><div class="kpi-title">Balance TINA − CAJA (kg)</div><div class="kpi-value">{fmt_num(k['kg_balance_entrada_salida'])}</div><div class="kpi-sub">Entradas TINA − Salidas CAJA</div></article>
-      <article class="card"><div class="kpi-title">Stock sin procesar fin de periodo (kg)</div><div class="kpi-value">{fmt_num(k['kg_stock_sin_procesar_fin'])}</div><div class="kpi-sub">Arrastre: Entradas TINA − TINA procesada</div></article>
-      <article class="card"><div class="kpi-title">BC lotes enlazados</div><div class="kpi-value">{int(k.get('bc_lotes_enlazados', 0)):,} / {int(k.get('bc_lotes_innova', 0)):,}</div><div class="kpi-sub">{fmt_pct(k.get('bc_pct_lotes_enlazados'))} · number = Lot No.</div></article>
-      <article class="card"><div class="kpi-title">Kg Innova enlazado</div><div class="kpi-value">{fmt_num(k.get('bc_kg_innova_enlazado', 0))}</div><div class="kpi-sub">Salidas Innova con lote en BC</div></article>
-      <article class="card"><div class="kpi-title">BC Kilos enlazados (ILE)</div><div class="kpi-value">{fmt_num(k.get('bc_kg_bc_enlazado', 0))}</div><div class="kpi-sub">Campo [Kilos] · dif.: {fmt_num(k.get('bc_kg_diferencia_enlazado', 0))} kg</div></article>
-      <article class="card"><div class="kpi-title">BC con pedido</div><div class="kpi-value">{fmt_num(k.get('bc_qty_con_pedido', 0))} ud.</div><div class="kpi-sub">{fmt_num(k.get('bc_kg_con_pedido', 0))} kg · sin pedido: {fmt_num(k.get('bc_qty_sin_pedido', 0))} ud.</div></article>
-      {stock_cards_html}
-    </section>
+    <div class="tab-panels">
+      <section class="tab-panel active" id="tab-intro" role="tabpanel" aria-labelledby="tab-btn-intro">
+        {intro_html}
+      </section>
 
-    {arrastre_trail_html}
+      <section class="tab-panel" id="tab-resumen" role="tabpanel" aria-labelledby="tab-btn-resumen">
+        <section class="grid">
+          <article class="card"><div class="kpi-title">Entradas TINA (kg)</div><div class="kpi-value">{fmt_num(k['kg_entrada_tina'])}</div><div class="kpi-sub">{k['packs_entrada']} Nº de Tinas</div></article>
+          <article class="card"><div class="kpi-title">TINA procesada (kg)</div><div class="kpi-value">{fmt_num(k['kg_consumo_tina'])}</div><div class="kpi-sub">{k['movs_consumo']} movimientos · entrada, no CAJA</div></article>
+          <article class="card"><div class="kpi-title">Salidas CAJA (kg)</div><div class="kpi-value">{fmt_num(k['kg_salida_no_tina'])}</div><div class="kpi-sub">{k['packs_salida']} Nº de Cajas</div></article>
+          <article class="card"><div class="kpi-title">Stock de tinas (kg)</div><div class="kpi-value">{fmt_num(k.get('kg_stock_entrada', 0))}</div><div class="kpi-sub">Premisa 4 · rtype 1 · SUM(weight)</div></article>
+          <article class="card"><div class="kpi-title">Merma (kg)</div><div class="kpi-value">{fmt_num(k.get('kg_merma', 0))}</div><div class="kpi-sub">Entradas − Salidas − Stock tinas · {fmt_pct(k.get('pct_merma'))}</div></article>
+          <article class="card"><div class="kpi-title">Stock inventario (kg)</div><div class="kpi-value">{fmt_num(k.get('kg_stock_inventario', 0))}</div><div class="kpi-sub">Premisa 7 pendiente (arrastre provisional)</div></article>
+          <article class="card"><div class="kpi-title">Balance TINA − CAJA (kg)</div><div class="kpi-value">{fmt_num(k['kg_balance_entrada_salida'])}</div><div class="kpi-sub">Entradas TINA − Salidas CAJA</div></article>
+          <article class="card"><div class="kpi-title">Acum. stock tinas periodo (kg)</div><div class="kpi-value">{fmt_num(k['kg_stock_sin_procesar_fin'])}</div><div class="kpi-sub">Suma diaria stock premisa 4 (no inventario)</div></article>
+          <article class="card"><div class="kpi-title">BC lotes enlazados</div><div class="kpi-value">{int(k.get('bc_lotes_enlazados', 0)):,} / {int(k.get('bc_lotes_innova', 0)):,}</div><div class="kpi-sub">{fmt_pct(k.get('bc_pct_lotes_enlazados'))} · number = Lot No.</div></article>
+          <article class="card"><div class="kpi-title">Kg Innova enlazado</div><div class="kpi-value">{fmt_num(k.get('bc_kg_innova_enlazado', 0))}</div><div class="kpi-sub">Salidas Innova con lote en BC</div></article>
+          <article class="card"><div class="kpi-title">BC Kilos enlazados (ILE)</div><div class="kpi-value">{fmt_num(k.get('bc_kg_bc_enlazado', 0))}</div><div class="kpi-sub">Campo [Kilos] · dif.: {fmt_num(k.get('bc_kg_diferencia_enlazado', 0))} kg</div></article>
+          <article class="card"><div class="kpi-title">BC con pedido</div><div class="kpi-value">{fmt_num(k.get('bc_qty_con_pedido', 0))} ud.</div><div class="kpi-sub">{fmt_num(k.get('bc_kg_con_pedido', 0))} kg · sin pedido: {fmt_num(k.get('bc_qty_sin_pedido', 0))} ud.</div></article>
+          {stock_cards_html}
+        </section>
+      </section>
 
-    <section class="trace-box">
-      <h3 class="trace-head">Trazabilidad SQL</h3>
-      <p class="trace-meta">Origen: <strong>{html.escape(str(sql_trace.get('data_source', data_source)))}</strong></p>
-      <p class="trace-meta">Tablas/Vistas: <strong>{html.escape(trace_tables)}</strong></p>
-      <p class="trace-meta">Parametros: <strong>start={html.escape(str(trace_params.get('start', '-')))}</strong>, <strong>end={html.escape(str(trace_params.get('end', '-')))}</strong></p>
-      {trace_queries_html}
-    </section>
+      <section class="tab-panel" id="tab-graficas" role="tabpanel" aria-labelledby="tab-btn-graficas">
+        <section class="charts">
+          <article class="chart-card chart-panel">
+            <h3>Evolucion diaria de biomasa (kg)</h3>
+            <button type="button" class="btn-max" data-chart="lineKg">Maximizar</button>
+            <canvas id="lineKg"></canvas>
+          </article>
+          <article class="chart-card chart-panel">
+            <h3>Diferencia diaria y acumulada</h3>
+            <button type="button" class="btn-max" data-chart="comboDiff">Maximizar</button>
+            <canvas id="comboDiff"></canvas>
+          </article>
+          <article class="chart-card chart-panel">
+            <h3>Composicion total del periodo (kg)</h3>
+            <button type="button" class="btn-max" data-chart="donutTotals">Maximizar</button>
+            <canvas id="donutTotals"></canvas>
+          </article>
+          <article class="chart-card chart-panel">
+            <h3>Stock y merma diarios (balance de masa)</h3>
+            <button type="button" class="btn-max" data-chart="lineStockMerma">Maximizar</button>
+            <canvas id="lineStockMerma"></canvas>
+          </article>
+          <article class="chart-card chart-panel">
+            <h3>Diferencia entre entradas y salidas (kg)</h3>
+            <button type="button" class="btn-max" data-chart="barBalance">Maximizar</button>
+            <canvas id="barBalance"></canvas>
+          </article>
+        </section>
+      </section>
 
-    <section class="charts">
-      <article class="chart-card chart-panel">
-        <h3>Evolucion diaria de biomasa (kg)</h3>
-        <button type="button" class="btn-max" data-chart="lineKg">Maximizar</button>
-        <canvas id="lineKg"></canvas>
-      </article>
-      <article class="chart-card chart-panel">
-        <h3>Diferencia diaria y acumulada</h3>
-        <button type="button" class="btn-max" data-chart="comboDiff">Maximizar</button>
-        <canvas id="comboDiff"></canvas>
-      </article>
-      <article class="chart-card chart-panel">
-        <h3>Composicion total del periodo (kg)</h3>
-        <button type="button" class="btn-max" data-chart="donutTotals">Maximizar</button>
-        <canvas id="donutTotals"></canvas>
-      </article>
-      <article class="chart-card chart-panel">
-        <h3>Stock y merma diarios (balance de masa)</h3>
-        <button type="button" class="btn-max" data-chart="lineStockMerma">Maximizar</button>
-        <canvas id="lineStockMerma"></canvas>
-      </article>
-      <article class="chart-card chart-panel">
-        <h3>Diferencia entre entradas y salidas (kg)</h3>
-        <button type="button" class="btn-max" data-chart="barBalance">Maximizar</button>
-        <canvas id="barBalance"></canvas>
-      </article>
-    </section>
+      <section class="tab-panel" id="tab-detalle" role="tabpanel" aria-labelledby="tab-btn-detalle">
+        <section class="tables">
+          <article class="chart-card">
+            <div class="section-head">
+              <h3>Detalle diario de produccion</h3>
+              <button type="button" class="btn-export" data-table-id="detalleTable" data-file-name="detalle_biomasa">
+                <span class="excel-icon">X</span>
+                Exportar Excel
+              </button>
+            </div>
+            <table id="detalleTable">
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th class="num">Entradas TINA (kg)</th>
+                  <th class="num">TINA procesada (kg)</th>
+                  <th class="num">Diferencia</th>
+                  <th class="num">% Diferencia</th>
+                  <th class="num">Salidas CAJA (kg)</th>
+                  <th class="num">Balance TINA−CAJA</th>
+                  <th class="num">Acum. Diferencia</th>
+                  <th class="num">Stock sin procesar</th>
+                </tr>
+              </thead>
+              <tbody>
+                {detail_rows_html}
+                <tr>
+                  <td><strong>TOTAL</strong></td>
+                  <td class="num"><strong>{fmt_num(k['kg_entrada_tina'])}</strong></td>
+                  <td class="num"><strong>{fmt_num(k['kg_consumo_tina'])}</strong></td>
+                  <td class="num"><strong>{fmt_num(k['kg_diferencia'])}</strong></td>
+                  <td class="num"><strong>{fmt_pct(k['pct_diferencia'])}</strong></td>
+                  <td class="num"><strong>{fmt_num(k['kg_salida_no_tina'])}</strong></td>
+                  <td class="num"><strong>{fmt_num(k['kg_balance_entrada_salida'])}</strong></td>
+                  <td class="num"><strong>{fmt_num(k['kg_diferencia'])}</strong></td>
+                  <td class="num"><strong>{fmt_num(k['kg_stock_sin_procesar_fin'])}</strong></td>
+                </tr>
+              </tbody>
+            </table>
+          </article>
+        </section>
+      </section>
 
-    <section class="tables">
-      <article class="chart-card">
-        <div class="section-head">
-          <h3>Detalle diario de produccion</h3>
-          <button type="button" class="btn-export" data-table-id="detalleTable" data-file-name="detalle_biomasa">
-            <span class="excel-icon">X</span>
-            Exportar Excel
-          </button>
-        </div>
-        <table id="detalleTable">
-          <thead>
-            <tr>
-              <th>Fecha</th>
-              <th class="num">Entradas TINA (kg)</th>
-              <th class="num">TINA procesada (kg)</th>
-              <th class="num">Diferencia</th>
-              <th class="num">% Diferencia</th>
-              <th class="num">Salidas CAJA (kg)</th>
-              <th class="num">Balance TINA−CAJA</th>
-              <th class="num">Acum. Diferencia</th>
-              <th class="num">Stock sin procesar</th>
-            </tr>
-          </thead>
-          <tbody>
-            {detail_rows_html}
-            <tr>
-              <td><strong>TOTAL</strong></td>
-              <td class="num"><strong>{fmt_num(k['kg_entrada_tina'])}</strong></td>
-              <td class="num"><strong>{fmt_num(k['kg_consumo_tina'])}</strong></td>
-              <td class="num"><strong>{fmt_num(k['kg_diferencia'])}</strong></td>
-              <td class="num"><strong>{fmt_pct(k['pct_diferencia'])}</strong></td>
-              <td class="num"><strong>{fmt_num(k['kg_salida_no_tina'])}</strong></td>
-              <td class="num"><strong>{fmt_num(k['kg_balance_entrada_salida'])}</strong></td>
-              <td class="num"><strong>{fmt_num(k['kg_diferencia'])}</strong></td>
-              <td class="num"><strong>{fmt_num(k['kg_stock_sin_procesar_fin'])}</strong></td>
-            </tr>
-          </tbody>
-        </table>
-      </article>
+      <section class="tab-panel" id="tab-balance" role="tabpanel" aria-labelledby="tab-btn-balance">
+        {arrastre_trail_html}
+        <section class="tables">
+          <article class="chart-card">
+            <div class="section-head">
+              <h3>Entradas, salidas, stock y merma</h3>
+              <button type="button" class="btn-export" data-table-id="stockMermaTable" data-file-name="entradas_salidas_stock_merma">
+                <span class="excel-icon">X</span>
+                Exportar Excel
+              </button>
+            </div>
+            <p class="muted" style="margin-top:0;">
+              Balance de masa: Entrada TINA = Salidas CAJA + Stock de tinas + Merma.
+              Stock de tinas = premisa 4 (consulta directa, rtype 1).
+            </p>
+            <table id="stockMermaTable">
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th class="num">Entradas (kg)</th>
+                  <th class="num">Salidas (kg)</th>
+                  <th class="num">Stock tinas (kg)</th>
+                  <th class="num">Merma (kg)</th>
+                  <th class="num">Balance E-S (kg)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stock_merma_rows_html}
+                <tr>
+                  <td><strong>TOTAL</strong></td>
+                  <td class="num"><strong>{fmt_num(k['kg_entrada_tina'])}</strong></td>
+                  <td class="num"><strong>{fmt_num(k['kg_salida_no_tina'])}</strong></td>
+                  <td class="num"><strong>{fmt_num(k.get('kg_stock_entrada', 0))}</strong></td>
+                  <td class="num"><strong>{fmt_num(k.get('kg_merma', 0))}</strong></td>
+                  <td class="num"><strong>{fmt_num(k['kg_balance_entrada_salida'])}</strong></td>
+                </tr>
+              </tbody>
+            </table>
+          </article>
+        </section>
+      </section>
 
-      <article class="chart-card">
-        <div class="section-head">
-          <h3>Entradas, salidas, stock y merma</h3>
-          <button type="button" class="btn-export" data-table-id="stockMermaTable" data-file-name="entradas_salidas_stock_merma">
-            <span class="excel-icon">X</span>
-            Exportar Excel
-          </button>
-        </div>
-        <p class="muted" style="margin-top:0;">
-          Balance de masa: Entrada TINA = Salidas CAJA + Stock de entrada + Merma.
-          Stock de entrada = Entradas − TINA procesada (kg que entran y no se procesan).
+      <section class="tab-panel" id="tab-bc" role="tabpanel" aria-labelledby="tab-btn-bc">
+        <section class="tables">
+          {bc_cruce_section_html}
+        </section>
+      </section>
+
+      <section class="tab-panel" id="tab-materiales" role="tabpanel" aria-labelledby="tab-btn-materiales">
+        <section class="tables">
+          <article class="chart-card">
+            <div class="section-head">
+              <h3>Top materiales de entrada</h3>
+              <button type="button" class="btn-export" data-table-id="topEntradasTable" data-file-name="top_materiales_entrada_tina_e">
+                <span class="excel-icon">X</span>
+                Exportar Excel
+              </button>
+            </div>
+            <table id="topEntradasTable">
+              <thead><tr><th>#</th><th>ID</th><th>Material</th><th class="num">kg</th></tr></thead>
+              <tbody>{top_entradas_rows}</tbody>
+            </table>
+            <div class="section-head" style="margin-top:18px;">
+              <h3>Top materiales de salida (resto)</h3>
+              <button type="button" class="btn-export" data-table-id="topSalidasTable" data-file-name="top_materiales_salida_no_tina">
+                <span class="excel-icon">X</span>
+                Exportar Excel
+              </button>
+            </div>
+            <table id="topSalidasTable">
+              <thead><tr><th>#</th><th>ID</th><th>Material</th><th class="num">kg</th></tr></thead>
+              <tbody>{top_salidas_rows}</tbody>
+            </table>
+          </article>
+        </section>
+      </section>
+
+      <section class="tab-panel" id="tab-debug" role="tabpanel" aria-labelledby="tab-btn-debug">
+        <p class="debug-panel-intro">
+          Auditoría técnica: premisas aplicadas en esta ejecución y consultas SQL reproducibles.
+          Documento canónico de reglas: <strong>PREMISAS.md</strong>.
         </p>
-        <table id="stockMermaTable">
-          <thead>
-            <tr>
-              <th>Fecha</th>
-              <th class="num">Entradas (kg)</th>
-              <th class="num">Salidas (kg)</th>
-              <th class="num">Stock entrada (kg)</th>
-              <th class="num">Merma (kg)</th>
-              <th class="num">Balance E-S (kg)</th>
-            </tr>
-          </thead>
-          <tbody>
-            {stock_merma_rows_html}
-            <tr>
-              <td><strong>TOTAL</strong></td>
-              <td class="num"><strong>{fmt_num(k['kg_entrada_tina'])}</strong></td>
-              <td class="num"><strong>{fmt_num(k['kg_salida_no_tina'])}</strong></td>
-              <td class="num"><strong>{fmt_num(k.get('kg_stock_entrada', 0))}</strong></td>
-              <td class="num"><strong>{fmt_num(k.get('kg_merma', 0))}</strong></td>
-              <td class="num"><strong>{fmt_num(k['kg_balance_entrada_salida'])}</strong></td>
-            </tr>
-          </tbody>
-        </table>
-      </article>
+        {premisa_entrada_html}
+        <section class="trace-box">
+          <h3 class="trace-head">Trazabilidad SQL</h3>
+          <p class="trace-meta">Origen: <strong>{html.escape(str(sql_trace.get('data_source', data_source)))}</strong></p>
+          <p class="trace-meta">Tablas/Vistas: <strong>{html.escape(trace_tables)}</strong></p>
+          <p class="trace-meta">Parametros: <strong>start={html.escape(str(trace_params.get('start', '-')))}</strong>, <strong>end={html.escape(str(trace_params.get('end', '-')))}</strong></p>
+          {trace_queries_html}
+        </section>
+      </section>
+    </div>
 
-      {bc_cruce_section_html}
-
-      <article class="chart-card">
-        <div class="section-head">
-          <h3>Top materiales de entrada</h3>
-          <button type="button" class="btn-export" data-table-id="topEntradasTable" data-file-name="top_materiales_entrada_tina_e">
-            <span class="excel-icon">X</span>
-            Exportar Excel
-          </button>
-        </div>
-        <table id="topEntradasTable">
-          <thead><tr><th>#</th><th>ID</th><th>Material</th><th class="num">kg</th></tr></thead>
-          <tbody>{top_entradas_rows}</tbody>
-        </table>
-        <div class="section-head" style="margin-top:18px;">
-          <h3>Top materiales de salida (resto)</h3>
-          <button type="button" class="btn-export" data-table-id="topSalidasTable" data-file-name="top_materiales_salida_no_tina">
-            <span class="excel-icon">X</span>
-            Exportar Excel
-          </button>
-        </div>
-        <table id="topSalidasTable">
-          <thead><tr><th>#</th><th>ID</th><th>Material</th><th class="num">kg</th></tr></thead>
-          <tbody>{top_salidas_rows}</tbody>
-        </table>
-      </article>
-    </section>
+    {nota_alerta_vap_html}
 
     <div id="chartModal" class="chart-modal" aria-hidden="true">
       <div class="chart-modal-content" role="dialog" aria-modal="true" aria-labelledby="chartModalTitle">
@@ -2098,7 +2646,7 @@ const chartConfigs = {{
     data: {{
       labels,
       datasets: [
-        {{ label: 'Stock de entrada', data: stockEntrada, borderColor: '#0b6e4f', tension: 0.25, fill: false }},
+        {{ label: 'Stock de tinas', data: stockEntrada, borderColor: '#0b6e4f', tension: 0.25, fill: false }},
         {{ label: 'Merma (balance)', data: merma, borderColor: '#f59e0b', tension: 0.25, fill: false }}
       ]
     }},
@@ -2118,8 +2666,40 @@ const chartConfigs = {{
   }}
 }};
 
+const chartInstances = {{}};
 for (const [chartId, chartConfig] of Object.entries(chartConfigs)) {{
-  new Chart(document.getElementById(chartId), chartConfig);
+  chartInstances[chartId] = new Chart(document.getElementById(chartId), chartConfig);
+}}
+
+function activateTab(tabId) {{
+  if (!tabId) return;
+  document.querySelectorAll('.tab-panel').forEach((panel) => {{
+    panel.classList.toggle('active', panel.id === tabId);
+  }});
+  document.querySelectorAll('.tab-btn').forEach((btn) => {{
+    const isActive = btn.getAttribute('data-tab') === tabId;
+    btn.classList.toggle('active', isActive);
+    btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
+  }});
+  if (tabId === 'tab-graficas') {{
+    Object.values(chartInstances).forEach((chart) => chart.resize());
+  }}
+  if (location.hash !== `#${{tabId}}`) {{
+    history.replaceState(null, '', `#${{tabId}}`);
+  }}
+}}
+
+document.querySelectorAll('.tab-btn').forEach((btn) => {{
+  btn.addEventListener('click', () => {{
+    activateTab(btn.getAttribute('data-tab'));
+  }});
+}});
+
+const initialTab = location.hash ? location.hash.slice(1) : 'tab-intro';
+if (document.getElementById(initialTab)) {{
+  activateTab(initialTab);
+}} else {{
+  activateTab('tab-intro');
 }}
 
 const chartModal = document.getElementById('chartModal');
@@ -2239,6 +2819,18 @@ if (btnExportAll) {{
     exportAllTablesToExcel(fileName);
   }});
 }}
+
+document.querySelectorAll('.bc-toggle').forEach((btn) => {{
+  btn.addEventListener('click', () => {{
+    const detailId = btn.getAttribute('aria-controls');
+    const detailRow = detailId ? document.getElementById(detailId) : null;
+    if (!detailRow) return;
+    const expanded = btn.getAttribute('aria-expanded') === 'true';
+    btn.setAttribute('aria-expanded', expanded ? 'false' : 'true');
+    btn.textContent = expanded ? '▸' : '▾';
+    detailRow.hidden = expanded;
+  }});
+}});
 </script>
 </body>
 </html>

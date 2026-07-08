@@ -35,6 +35,8 @@ from generar_reporte_biomasa import (
     fmt_num,
     fmt_pct,
     load_dotenv_file,
+    NOTA_ALERTA_VAP,
+    NOTA_ALERTA_VAP_TITULO,
     parse_stock_inicial_arg,
     parse_user_date,
     resolve_bc_credentials,
@@ -91,34 +93,29 @@ def build_comprobaciones(k: dict[str, Any]) -> list[dict[str, Any]]:
     e = k["kg_entrada_tina"]
     s = k["kg_salida_no_tina"]
     p = k["kg_consumo_tina"]
-    stock_entrada = k.get("kg_stock_entrada") or k["kg_diferencia"]
+    stock_tinas = k.get("kg_stock_entrada") or k.get("kg_stock_tinas") or 0.0
     merma = k.get("kg_merma") or 0.0
     stock_ini = k.get("kg_stock_inicial") or 0.0
     stock_inventario = k.get("kg_stock_inventario") or k.get("kg_stock_cierre_teorico") or 0.0
 
     checks = [
         {
-            "comprobacion": "Balance masa: Entrada = Salida + Stock entrada + Merma",
-            "formula": f"{e:.2f} = {s:.2f} + {stock_entrada:.2f} + {merma:.2f}",
-            "residual_kg": e - (s + stock_entrada + merma),
+            "comprobacion": "Balance masa: Entrada = Salida + Stock tinas + Merma",
+            "formula": f"{e:.2f} = {s:.2f} + {stock_tinas:.2f} + {merma:.2f}",
+            "residual_kg": e - (s + stock_tinas + merma),
         },
         {
-            "comprobacion": "Stock de entrada = Entradas - TINA procesada",
-            "formula": f"{stock_entrada:.2f} = {e:.2f} - {p:.2f}",
-            "residual_kg": stock_entrada - (e - p),
+            "comprobacion": "Merma = Entradas - Salidas - Stock de tinas",
+            "formula": f"{merma:.2f} = {e:.2f} - {s:.2f} - {stock_tinas:.2f}",
+            "residual_kg": merma - (e - s - stock_tinas),
         },
         {
-            "comprobacion": "Merma = Entradas - Salidas - Stock de entrada",
-            "formula": f"{merma:.2f} = {e:.2f} - {s:.2f} - {stock_entrada:.2f}",
-            "residual_kg": merma - (e - s - stock_entrada),
+            "comprobacion": "Gap: Stock tinas (P4) vs Entradas - Procesadas",
+            "formula": f"{stock_tinas:.2f} vs {e - p:.2f}",
+            "residual_kg": stock_tinas - (e - p),
         },
         {
-            "comprobacion": "Merma = TINA procesada - Salidas CAJA",
-            "formula": f"{merma:.2f} = {p:.2f} - {s:.2f}",
-            "residual_kg": merma - (p - s),
-        },
-        {
-            "comprobacion": "Stock inventario = Stock inicial + Entradas - TINA procesada",
+            "comprobacion": "Stock inventario provisional (premisa 7 pendiente)",
             "formula": f"{stock_inventario:.2f} = {stock_ini:.2f} + {e:.2f} - {p:.2f}",
             "residual_kg": stock_inventario - (stock_ini + e - p),
         },
@@ -154,9 +151,9 @@ def write_contraste_md(
         f"| Salidas CAJA | {fmt_num(k['kg_salida_no_tina'])} |",
         f"| TINA procesada | {fmt_num(k['kg_consumo_tina'])} |",
         f"| Stock inicial | {fmt_num(k.get('kg_stock_inicial', 0))} |",
-        f"| Stock de entrada | {fmt_num(k.get('kg_stock_entrada', k['kg_diferencia']))} |",
+        f"| Stock de tinas | {fmt_num(k.get('kg_stock_entrada', k.get('kg_stock_tinas', 0)))} |",
         f"| Stock inventario cierre | {fmt_num(k.get('kg_stock_inventario', 0))} |",
-        f"| Merma (E - S - Stock entrada) | {fmt_num(k.get('kg_merma', 0))} |",
+        f"| Merma (E - S - Stock tinas) | {fmt_num(k.get('kg_merma', 0))} |",
         f"| % Merma / entradas | {fmt_pct(k.get('pct_merma'))} |",
         f"| Balance TINA - CAJA | {fmt_num(k['kg_balance_entrada_salida'])} |",
         "",
@@ -202,6 +199,12 @@ def write_contraste_md(
         "- [ ] Confirmar stock inventario cierre con planta",
         "- [ ] Interpretar merma negativa vs stock arrastrado",
         "- [ ] Firmar mes como referencia antes de replicar a otros meses",
+        "",
+        "---",
+        "",
+        f"**{NOTA_ALERTA_VAP_TITULO}**",
+        "",
+        f"*{NOTA_ALERTA_VAP}*",
         "",
     ])
     path.write_text("\n".join(lines), encoding="utf-8")
@@ -278,6 +281,11 @@ def main() -> None:
     detalle = report_data["detalle_diario"]
     checks = build_comprobaciones(k)
 
+    (out_dir / "00_NOTA_ALERTA_VAP.txt").write_text(
+        f"{NOTA_ALERTA_VAP_TITULO}\n\n{NOTA_ALERTA_VAP}\n",
+        encoding="utf-8",
+    )
+
     write_csv(
         out_dir / "01_resumen_kpis.csv",
         ["Metrica", "Valor", "Unidad"],
@@ -286,13 +294,14 @@ def main() -> None:
             ["Salidas CAJA", csv_num(k["kg_salida_no_tina"]), "kg"],
             ["TINA procesada", csv_num(k["kg_consumo_tina"]), "kg"],
             ["Stock inicial", csv_num(k.get("kg_stock_inicial")), "kg"],
-            ["Stock de entrada", csv_num(k.get("kg_stock_entrada")), "kg"],
+            ["Stock de tinas", csv_num(k.get("kg_stock_entrada")), "kg"],
             ["Stock inventario cierre", csv_num(k.get("kg_stock_inventario")), "kg"],
             ["Merma", csv_num(k.get("kg_merma")), "kg"],
             ["% Merma", csv_num(k.get("pct_merma")), "%"],
             ["Balance TINA-CAJA", csv_num(k["kg_balance_entrada_salida"]), "kg"],
             ["Nº de Tinas (entrada)", str(k["packs_entrada"]), "ud"],
-            ["Packs salida", str(k["packs_salida"]), "ud"],
+            ["Packs salida (Nº de Cajas)", str(k["packs_salida"]), "ud"],
+            ["NOTA VAP (ver 00_NOTA_ALERTA_VAP.txt)", NOTA_ALERTA_VAP, ""],
         ],
     )
 
@@ -328,7 +337,7 @@ def main() -> None:
         out_dir / "02_detalle_diario.csv",
         [
             "Fecha", "Entradas TINA", "Salidas CAJA", "TINA procesada",
-            "Stock entrada", "Merma", "Balance T-C", "Stock inventario",
+            "Stock tinas", "Merma", "Balance T-C", "Stock inventario",
         ],
         daily_rows,
     )
