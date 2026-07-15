@@ -404,6 +404,7 @@ Cruce **por lote/caja** entre salidas Innova y ventas en Business Central (BC). 
 | **Clave de enlace** | `dbo.proc_packs.number` = `bc.[Item Ledger Entry].[Lot No.]` |
 | **Lado Innova** | Packs de **salida CAJA** (premisa 3) con `number` informado |
 | **Lado BC — ventas** | `bc.[Item Ledger Entry]` con `[Entry Type] = 1` |
+| **Almacenes BC** | `[Location Code]` en **E** y **G** unicamente |
 | **Kg BC** | `ABS([Kilos])` en Item Ledger Entry |
 | **Unidades BC** | `ABS([Quantity])` en Item Ledger Entry |
 | **Pedido** | `[Order No.]` de `bc.[Sales Shipment Line]` del mismo `[Document No.]` que el ILE |
@@ -488,6 +489,7 @@ LEFT JOIN doc_order sl ON sl.document_no = ile.[Document No.]
 WHERE ile.[Posting Date] >= @start
   AND ile.[Posting Date] < DATEADD(day, 1, @end)
   AND ile.[Entry Type] = 1
+  AND ile.[Location Code] IN ('E', 'G')
   AND NULLIF(LTRIM(RTRIM(ile.[Lot No.])), '') IS NOT NULL
 GROUP BY CAST(ile.[Lot No.] AS varchar(50))
 ORDER BY lot;
@@ -540,22 +542,24 @@ Balance de masa en Business Central para **Location Code E y G** unicamente.
 
 | Concepto | Definicion |
 |----------|------------|
-| **Stock inicial (dia)** | Ventas del dia con `[Fecha empaque]` anterior al dia de venta |
+| **Stock inicial (dia)** | ILE: `[Fecha empaque]` anterior al dia; venta o ajuste negativo (Entry Type 1/3) en ese dia o posteriores |
+| **Stock final teorico** | **Stock inicial + Salidas Innova − Ventas** |
+| **Stock final real** | Empaque del periodo hasta ese dia sin venta hasta ese dia (kg BC por lote) |
+| **Encadenamiento** | Stock final del dia N = stock inicial del dia N+1 |
 | **Salidas Innova** | Salidas CAJA del dia (`proc_packs`, premisa 3) |
 | **Ventas BC** | ILE `[Entry Type] = 1`, `[Posting Date]` del dia, almacenes E/G |
-| **Stock teorico (dia)** | Stock inicial + Salidas Innova − Ventas del dia (flujo) |
-| **Stock teorico (cierre)** | Stock apertura + Salidas Innova acumuladas − Ventas acumuladas |
 | **Stock apertura** | Empaque anterior al periodo sin venta previa en E/G |
-| **Stock real (cierre)** | Empaque del periodo hasta ese dia sin venta hasta ese dia (kg BC por lote) |
-| **Diferencia** | Stock teorico cierre − Stock real cierre |
+| **Check** | Stock final teorico − Stock final real |
+| **Alcance check** | Solo lotes con empaque o movimiento ILE en el mes del periodo |
+| **Historico ILE** | Consultas acotadas desde **2026-01-01** (`[Posting Date]` / `[Fecha empaque]`) para evitar timeout en BC |
 
 ### Fines de semana y festivos
 
 En **fines de semana** (y dias sin actividad comercial):
 
 - **No hay** Salidas Innova ni Ventas BC → esas columnas quedan a **0 kg**.
-- **Si hay** stock de inicio y stock final del dia: el **stock teorico cierre** y el **stock real cierre** se mantienen (arrastre desde el ultimo dia laborable con movimiento).
-- La columna **Stock inicial (dia)** queda a 0 al no registrarse ventas ese dia; el inventario de cierre sigue reflejado en las columnas de stock teorico/real.
+- **Stock inicial (dia)** = consulta ILE (empaque anterior; salida en dia o despues).
+- **Stock final teorico** y **stock final real** se mantienen si no hay movimiento (arrastre).
 
 La tabla del informe incluye **todos los dias del mes** (laborables y fines de semana) para mostrar el cierre diario completo.
 
