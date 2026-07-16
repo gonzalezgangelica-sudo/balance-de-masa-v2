@@ -567,9 +567,28 @@ La tabla del informe incluye **todos los dias del mes** (laborables y fines de s
 
 | Nivel | Clave | Campos |
 |-------|-------|--------|
-| **Tipo producto** | `proc_materials.material` (Innova) | Nombre material, totales kg Innova / ventas BC / stock final, nº lotes |
+| **Tipo producto** | `bc.[Conversion productos].[Cod. producto]` | Enlace: Innova `material` = `Cod. bascula`; fallback `pattern` / `[Item No.]` |
+| **Balance por tipo (cajas)** | Por Cod. producto / `[Item No.]` | Stock inicial / **Entradas BC (ajustes +)** / **Ventas BC** / Stock teorico / Stock real / Check en **nº de cajas** |
 | **Lote** | `proc_packs.number` = BC `[Lot No.]` | Fecha empaque, kg Innova, kg BC, kg ventas, estado (stock final / vendido / apertura) |
-| **Item BC** | `[Item No.]` / `[Description]` en ILE | Respaldo cuando no hay material Innova enlazado |
+| **Item BC** | `[Item No.]` / `[Description]` en ILE | Coincide con `Cod. producto` cuando hay conversion |
+
+**Enlace producto Innova ↔ BC:**
+
+| Campo | Origen |
+|-------|--------|
+| **Cod. bascula** | `bc.[Conversion productos].[Cod. bascula]` = `proc_materials.material` (Innova) |
+| **Cod. producto** | `bc.[Conversion productos].[Cod. producto]` ≈ ILE `[Item No.]` (ej. `RF1520M`) |
+| **Pattern Innova** | `proc_materials.pattern` — respaldo si no hay fila en Conversion |
+
+**Unidades en cajas (pestaña Balance por tipo):**
+
+- **Entradas BC** = ajustes positivos ILE (`[Entry Type] = 2`, almacenes E/G): `SUM(ABS([Quantity]))` por `[Item No.]` / Cod. producto.
+- **Ventas BC** = ventas ILE (`[Entry Type] = 1`, almacenes E/G): `SUM(ABS([Quantity]))` por `[Item No.]` / Cod. producto.
+- **Stock teorico** = Stock inicial + Entradas − Ventas.
+- Stock inicial dia 1 = lotes ILE en stock al inicio (empaque anterior; salida ese dia o despues); 1 lote = 1 caja.
+- Stock final real = lotes ILE en stock al cierre (incluye arrastre de dias anteriores); 1 lote = 1 caja.
+- **Encadenamiento:** stock final teorico dia N = stock inicial dia N+1.
+- Formula: Stock teorico = Stock inicial + Salidas − Ventas; Check = teorico − real.
 
 En la pestaña **Balance BC E/G** hay dos tablas adicionales:
 
