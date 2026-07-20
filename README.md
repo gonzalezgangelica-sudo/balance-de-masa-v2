@@ -31,7 +31,7 @@ Mecanismo oficial de distribución: carpeta del proyecto + scripts `.bat`.
 1. Copiar la carpeta del repositorio a la ruta de trabajo del usuario, por ejemplo:
    - `C:\Apps\CALCULO_BIOMASA\`
    - o una unidad de red mapeada (evitar UNC directo `\\servidor\...` si el venv falla)
-2. **No** distribuir secretos por correo/chat. Cada puesto configura credenciales con `configurar_credenciales.bat`.
+2. **No** distribuir el `.env` con secretos por correo/chat. Cada puesto mantiene su propio `.env` local.
 3. Opcional: clonar desde Git si el equipo tiene acceso al repositorio.
 
 Archivos que **sí** se distribuyen: código `.py`, `.bat`, `requirements.txt`, `.env.example`, `PREMISAS.md`, `stolt_logo.svg`, etc.  
@@ -41,18 +41,18 @@ Archivos **locales** (no versionar / no compartir): `.venv\`, `Reports\*.html`, 
 
 ```bat
 crear_entorno.bat
-configurar_credenciales.bat
 ```
 
-1. `crear_entorno.bat` — comprueba Python, crea `.venv`, instala dependencias  
-2. `configurar_credenciales.bat` — **solo la primera vez** (o si cambian passwords)
+Luego editar `.env` (opción 2 del menú o Bloc de notas).
 
-Las credenciales quedan en la **misma carpeta del proyecto**:
+1. `crear_entorno.bat` — comprueba Python, crea `.venv`, instala dependencias  
+2. Editar **`.env`** en la carpeta del proyecto (opción 2 del menú o Bloc de notas)
+
+Las credenciales van **fijas** en:
 
 `.env`
 
-También se pueden guardar en **Windows Credential Manager** (vía `keyring`).  
-Plantilla sin secretos: `.env.example`.
+No se preguntan por pantalla. Plantilla: `.env.example` (copiar a `.env` si no existe).
 
 ### 3. Generar un informe
 
@@ -76,17 +76,14 @@ ejecutar_reporte.bat
 
 Al terminar bien, abre el HTML más reciente de `Reports\`.
 
-### 4. Credenciales (locales al proyecto)
+### 4. Credenciales (fijas en `.env`)
 
 | Dónde | Qué guarda |
 |-------|------------|
 | `.env` en la carpeta del proyecto | Servidores, usuarios y passwords (**no se versiona**) |
-| Windows Credential Manager | Passwords Innova/BC (opcional) |
 
-Prioridad de carga: `.env` del proyecto → keyring.
-
-Para cambiar passwords: `configurar_credenciales.bat` (Enter mantiene el valor actual).  
-Plantilla sin secretos: `.env.example`.
+El informe solo lee `.env`. Para cambiar passwords: editar `.env` a mano.  
+Plantilla sin secretos: `.env.example`. La opción 2 del menú crea `.env` desde la plantilla y lo abre en el Bloc de notas.
 
 ### 5. Problemas frecuentes
 

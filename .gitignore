@@ -1,5 +1,4 @@
 # Entorno local
-.env
 .venv/
 venv/
 .python_path

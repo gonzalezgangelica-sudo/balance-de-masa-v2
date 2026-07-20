@@ -541,8 +541,8 @@ def resolve_db_credentials(args: argparse.Namespace) -> tuple[str, str]:
 
     if not user or not password:
       raise RuntimeError(
-        "No hay credenciales Innova. Ejecute configurar_credenciales.bat "
-        "o cree el fichero .env en la carpeta del proyecto (vea .env.example)."
+        "No hay credenciales Innova. Edite el fichero .env en la carpeta del proyecto "
+        "(vea .env.example): DB_USER y DB_PASSWORD."
       )
 
     if args.save_creds:
@@ -573,8 +573,8 @@ def resolve_bc_credentials(args: argparse.Namespace) -> tuple[str, str, str, str
 
     if not all([server, database, user, password]):
         raise RuntimeError(
-            "Credenciales Business Central incompletas. Ejecute configurar_credenciales.bat "
-            "o complete BC_SERVER / BC_DATABASE / BC_USER / BC_PASSWORD."
+            "Credenciales Business Central incompletas. Edite .env en la carpeta del proyecto "
+            "(BC_SERVER, BC_DATABASE, BC_USER, BC_PASSWORD; vea .env.example)."
         )
 
     if args.save_creds:

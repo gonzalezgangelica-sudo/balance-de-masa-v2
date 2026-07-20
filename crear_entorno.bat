@@ -115,11 +115,11 @@ if errorlevel 1 (
 )
 
 if exist ".env" (
-  echo [INFO] Credenciales del proyecto encontradas: .env
+  echo [INFO] Credenciales del proyecto: .env ^(editar a mano, no se preguntan^)
 ) else (
-  echo [AVISO] Aun no hay credenciales configuradas.
+  echo [AVISO] Falta .env en esta carpeta.
   echo         Ejecute: configurar_credenciales.bat
-  echo         ^(crea .env en esta misma carpeta^)
+  echo         ^(crea .env desde .env.example y lo abre para editar^)
 )
 
 if not exist "Reports" mkdir "Reports"
@@ -129,7 +129,7 @@ echo.
 echo [OK] Entorno listo.
 echo.
 echo Siguiente paso:
-echo   1. configurar_credenciales.bat   ^(solo la primera vez / si cambian passwords^)
+echo   1. Editar .env ^(configurar_credenciales.bat o Bloc de notas^)
 echo   2. Iniciar_Reporte_Biomasa.bat   o   ejecutar_reporte.bat DD/MM/AAAA DD/MM/AAAA
 echo.
 endlocal

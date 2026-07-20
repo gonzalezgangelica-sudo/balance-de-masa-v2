@@ -13,8 +13,8 @@ if not exist ".venv\Scripts\python.exe" (
 
 if not exist ".env" (
   echo [AVISO] No hay fichero .env en la carpeta del proyecto.
-  echo         Ejecute configurar_credenciales.bat ^(crea .env aqui^)
-  echo         o copie .env.example a .env y complete los valores.
+  echo         Ejecute configurar_credenciales.bat o copie .env.example a .env
+  echo         y rellene DB_USER / DB_PASSWORD / BC_* a mano.
   exit /b 1
 )
 
