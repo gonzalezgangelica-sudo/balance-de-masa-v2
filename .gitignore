@@ -11,6 +11,7 @@ __pycache__/
 # Salidas generadas (regenerar con generar_reporte_biomasa.py)
 Reports/*
 !Reports/.gitkeep
+logs/
 logs/*.log
 
 # Artefactos locales de AL/BC (no pertenecen a este proyecto Python)

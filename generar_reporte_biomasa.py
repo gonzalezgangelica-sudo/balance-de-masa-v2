@@ -39,6 +39,37 @@ DEFAULT_BC_SERVER = ""
 DEFAULT_BC_DATABASE = ""
 DEFAULT_BC_USER = ""
 DEFAULT_BC_PASSWORD = ""
+DEFAULT_INNOVA_CRED_TARGET = "biomasa_sql_innova"
+DEFAULT_BC_CRED_TARGET = "biomasa_sql_bc"
+
+
+def user_credentials_dir() -> Path:
+    """Carpeta de credenciales por usuario (persiste aunque se redespliegue el codigo)."""
+    local = os.environ.get("LOCALAPPDATA")
+    if local:
+        base = Path(local)
+    else:
+        base = Path.home() / "AppData" / "Local"
+    path = base / "Stolt" / "CALCULO_BIOMASA"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def user_credentials_env_path() -> Path:
+    return user_credentials_dir() / "credentials.env"
+
+
+def hide_windows_file(path: Path) -> None:
+    """Marca el fichero como oculto en Windows (Explorer)."""
+    if os.name != "nt" or not path.exists():
+        return
+    try:
+        import ctypes
+
+        FILE_ATTRIBUTE_HIDDEN = 0x02
+        ctypes.windll.kernel32.SetFileAttributesW(str(path), FILE_ATTRIBUTE_HIDDEN)
+    except Exception:
+        pass
 
 
 def load_dotenv_file(env_path: Path) -> None:
@@ -78,6 +109,35 @@ def load_dotenv_file(env_path: Path) -> None:
       os.environ[env_key] = value
 
 
+def load_app_credentials(base_dir: Path) -> list[Path]:
+    """Carga credenciales: primero perfil de usuario (oculto), luego .env del proyecto."""
+    loaded: list[Path] = []
+    for path in (user_credentials_env_path(), base_dir / ".env"):
+        if path.exists():
+            load_dotenv_file(path)
+            loaded.append(path)
+    return loaded
+
+
+def keyring_get(service: str, username: str) -> str:
+    if keyring is None:
+        return ""
+    try:
+        return (keyring.get_password(service, username) or "").strip()
+    except Exception:
+        return ""
+
+
+def keyring_set(service: str, username: str, password: str) -> bool:
+    if keyring is None:
+        return False
+    try:
+        keyring.set_password(service, username, password)
+        return True
+    except Exception:
+        return False
+
+
 def load_logo_data_uri(base_dir: Path) -> str | None:
   logo_path = base_dir / "stolt_logo.svg"
   if not logo_path.exists():
@@ -97,13 +157,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--password", default=os.getenv("DB_PASSWORD", DEFAULT_PASSWORD))
     parser.add_argument(
       "--cred-target",
-      default="biomasa_sql_innova",
-      help="Identificador para guardar/leer credenciales seguras del sistema.",
+      default=DEFAULT_INNOVA_CRED_TARGET,
+      help="Identificador keyring para credenciales Innova.",
+    )
+    parser.add_argument(
+      "--bc-cred-target",
+      default=DEFAULT_BC_CRED_TARGET,
+      help="Identificador keyring para credenciales Business Central.",
     )
     parser.add_argument(
       "--save-creds",
       action="store_true",
-      help="Guarda user/pass en el almacen seguro del sistema para proximas ejecuciones.",
+      help="Guarda user/pass Innova y BC en el almacen seguro de Windows (Credential Manager).",
     )
     parser.add_argument(
         "--output",
@@ -412,30 +477,24 @@ def resolve_db_credentials(args: argparse.Namespace) -> tuple[str, str]:
     user = (args.user or "").strip()
     password = (args.password or "").strip()
 
-    if keyring is not None:
-        if not user:
-            saved_user = keyring.get_password(args.cred_target, "user")
-            if saved_user:
-                user = saved_user
-        if not password:
-            saved_pass = keyring.get_password(args.cred_target, "password")
-            if saved_pass:
-                password = saved_pass
+    if not user:
+        user = keyring_get(args.cred_target, "user")
+    if not password:
+        password = keyring_get(args.cred_target, "password")
 
     if not user or not password:
       raise RuntimeError(
-        "No hay credenciales disponibles de forma automatica. "
-        "Configure keyring (recomendado) o variables de entorno DB_USER/DB_PASSWORD, "
-        "o pase --user y --password por CLI."
+        "No hay credenciales Innova. Ejecute configurar_credenciales.bat (recomendado) "
+        "o cree el fichero de perfil de usuario / .env del proyecto."
       )
 
     if args.save_creds:
-        if keyring is None:
-            print("Aviso: keyring no esta disponible; no se pueden guardar credenciales cifradas.")
+        if keyring_set(args.cred_target, "user", user) and keyring_set(
+            args.cred_target, "password", password
+        ):
+            print(f"Credenciales Innova guardadas en Windows Credential Manager ({args.cred_target}).")
         else:
-            keyring.set_password(args.cred_target, "user", user)
-            keyring.set_password(args.cred_target, "password", password)
-            print(f"Credenciales guardadas de forma segura en keyring con target: {args.cred_target}")
+            print("Aviso: no se pudieron guardar credenciales Innova en keyring.")
 
     return user, password
 
@@ -445,11 +504,36 @@ def resolve_bc_credentials(args: argparse.Namespace) -> tuple[str, str, str, str
     database = (args.bc_database or "").strip()
     user = (args.bc_user or "").strip()
     password = (args.bc_password or "").strip()
+
+    if not user:
+        user = keyring_get(args.bc_cred_target, "user")
+    if not password:
+        password = keyring_get(args.bc_cred_target, "password")
+    if not server:
+        server = keyring_get(args.bc_cred_target, "server")
+    if not database:
+        database = keyring_get(args.bc_cred_target, "database")
+
     if not all([server, database, user, password]):
         raise RuntimeError(
-            "Credenciales Business Central incompletas. Configure BC_SERVER, BC_DATABASE, "
-            "BC_USER y BC_PASSWORD en .env (o parametros --bc-*)."
+            "Credenciales Business Central incompletas. Ejecute configurar_credenciales.bat "
+            "o complete BC_SERVER / BC_DATABASE / BC_USER / BC_PASSWORD."
         )
+
+    if args.save_creds:
+        ok = all(
+            [
+                keyring_set(args.bc_cred_target, "server", server),
+                keyring_set(args.bc_cred_target, "database", database),
+                keyring_set(args.bc_cred_target, "user", user),
+                keyring_set(args.bc_cred_target, "password", password),
+            ]
+        )
+        if ok:
+            print(f"Credenciales BC guardadas en Windows Credential Manager ({args.bc_cred_target}).")
+        else:
+            print("Aviso: no se pudieron guardar credenciales BC en keyring.")
+
     return server, database, user, password
 
 
@@ -5050,10 +5134,11 @@ document.querySelectorAll('.bc-toggle').forEach((btn) => {{
 
 def main() -> None:
     base_dir = Path(__file__).resolve().parent
-    env_path = base_dir / ".env"
-    load_dotenv_file(env_path)
+    loaded_env = load_app_credentials(base_dir)
     logo_data_uri = load_logo_data_uri(base_dir)
     args = parse_args()
+    if loaded_env:
+        print("Credenciales cargadas desde: " + ", ".join(str(p) for p in loaded_env))
     stock_inicial_manual, stock_inicial_auto = parse_stock_inicial_arg(args.stock_inicial)
     use_arrastre = args.arrastre_mensual or stock_inicial_auto
     if args.stock_final_fisico is not None and not use_arrastre and stock_inicial_manual is None:
