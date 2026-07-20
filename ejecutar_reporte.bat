@@ -11,11 +11,10 @@ if not exist ".venv\Scripts\python.exe" (
   )
 )
 
-set "USER_CREDS=%LOCALAPPDATA%\Stolt\CALCULO_BIOMASA\credentials.env"
-if not exist "%USER_CREDS%" if not exist ".env" (
-  echo [AVISO] No hay credenciales configuradas.
-  echo         Ejecute configurar_credenciales.bat ^(recomendado^)
-  echo         o cree un .env en la carpeta del proyecto.
+if not exist ".env" (
+  echo [AVISO] No hay fichero .env en la carpeta del proyecto.
+  echo         Ejecute configurar_credenciales.bat ^(crea .env aqui^)
+  echo         o copie .env.example a .env y complete los valores.
   exit /b 1
 )
 

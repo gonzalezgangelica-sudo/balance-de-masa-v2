@@ -114,18 +114,12 @@ if errorlevel 1 (
   exit /b 1
 )
 
-set "USER_CREDS=%LOCALAPPDATA%\Stolt\CALCULO_BIOMASA\credentials.env"
-if exist "%USER_CREDS%" (
-  echo [INFO] Credenciales de usuario encontradas ^(ocultas^):
-  echo        %USER_CREDS%
-  echo        No hace falta recrear .env en esta carpeta.
-) else if exist ".env" (
-  echo [INFO] .env del proyecto encontrado.
-  echo        Recomendado: ejecutar configurar_credenciales.bat
-  echo        para moverlas al perfil de usuario ^(ocultas y persistentes^).
+if exist ".env" (
+  echo [INFO] Credenciales del proyecto encontradas: .env
 ) else (
   echo [AVISO] Aun no hay credenciales configuradas.
   echo         Ejecute: configurar_credenciales.bat
+  echo         ^(crea .env en esta misma carpeta^)
 )
 
 if not exist "Reports" mkdir "Reports"

@@ -43,24 +43,23 @@ DEFAULT_INNOVA_CRED_TARGET = "biomasa_sql_innova"
 DEFAULT_BC_CRED_TARGET = "biomasa_sql_bc"
 
 
-def user_credentials_dir() -> Path:
-    """Carpeta de credenciales por usuario (persiste aunque se redespliegue el codigo)."""
-    local = os.environ.get("LOCALAPPDATA")
-    if local:
-        base = Path(local)
-    else:
-        base = Path.home() / "AppData" / "Local"
-    path = base / "Stolt" / "CALCULO_BIOMASA"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+def project_root() -> Path:
+    """Carpeta del proyecto (donde estan los scripts)."""
+    return Path(__file__).resolve().parent
 
 
+def project_env_path(base_dir: Path | None = None) -> Path:
+    """Credenciales locales del proyecto: <carpeta_scripts>/.env"""
+    return (base_dir or project_root()) / ".env"
+
+
+# Compatibilidad con imports antiguos (configurar_credenciales.py).
 def user_credentials_env_path() -> Path:
-    return user_credentials_dir() / "credentials.env"
+    return project_env_path()
 
 
 def hide_windows_file(path: Path) -> None:
-    """Marca el fichero como oculto en Windows (Explorer)."""
+    """Marca el fichero como oculto en Windows (Explorer). Opcional."""
     if os.name != "nt" or not path.exists():
         return
     try:
@@ -110,12 +109,12 @@ def load_dotenv_file(env_path: Path) -> None:
 
 
 def load_app_credentials(base_dir: Path) -> list[Path]:
-    """Carga credenciales: primero perfil de usuario (oculto), luego .env del proyecto."""
+    """Carga credenciales solo desde .env en la carpeta del proyecto."""
     loaded: list[Path] = []
-    for path in (user_credentials_env_path(), base_dir / ".env"):
-        if path.exists():
-            load_dotenv_file(path)
-            loaded.append(path)
+    env_path = project_env_path(base_dir)
+    if env_path.exists():
+        load_dotenv_file(env_path)
+        loaded.append(env_path)
     return loaded
 
 
@@ -542,8 +541,8 @@ def resolve_db_credentials(args: argparse.Namespace) -> tuple[str, str]:
 
     if not user or not password:
       raise RuntimeError(
-        "No hay credenciales Innova. Ejecute configurar_credenciales.bat (recomendado) "
-        "o cree el fichero de perfil de usuario / .env del proyecto."
+        "No hay credenciales Innova. Ejecute configurar_credenciales.bat "
+        "o cree el fichero .env en la carpeta del proyecto (vea .env.example)."
       )
 
     if args.save_creds:

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Configura credenciales persistentes y ocultas para CALCULO_BIOMASA.
+"""Configura credenciales locales para CALCULO_BIOMASA.
 
-Guarda:
-  %LOCALAPPDATA%\\Stolt\\CALCULO_BIOMASA\\credentials.env  (oculto)
-  Windows Credential Manager (keyring) para contraseñas Innova y BC
+Guarda todo en la carpeta del proyecto:
+  <carpeta_scripts>/.env
+
+Opcionalmente tambien en Windows Credential Manager (keyring).
 
 Uso:
   python configurar_credenciales.py
@@ -20,10 +21,9 @@ from generar_reporte_biomasa import (
     DEFAULT_DATABASE,
     DEFAULT_INNOVA_CRED_TARGET,
     DEFAULT_SERVER,
-    hide_windows_file,
     keyring_set,
     load_dotenv_file,
-    user_credentials_env_path,
+    project_env_path,
 )
 
 
@@ -38,26 +38,9 @@ def _prompt(label: str, default: str = "", secret: bool = False) -> str:
 
 
 def _read_existing() -> dict[str, str]:
-    path = user_credentials_env_path()
+    path = project_env_path()
     values: dict[str, str] = {}
     if not path.exists():
-        project_env = Path(__file__).resolve().parent / ".env"
-        if project_env.exists():
-            load_dotenv_file(project_env)
-            import os
-
-            for key in (
-                "DB_SERVER",
-                "DB_NAME",
-                "DB_USER",
-                "DB_PASSWORD",
-                "BC_SERVER",
-                "BC_DATABASE",
-                "BC_USER",
-                "BC_PASSWORD",
-            ):
-                if os.getenv(key):
-                    values[key] = os.environ[key]
         return values
 
     load_dotenv_file(path)
@@ -79,14 +62,15 @@ def _read_existing() -> dict[str, str]:
 
 
 def main() -> int:
+    env_path = project_env_path()
     print("=" * 50)
     print(" CALCULO_BIOMASA - Configurar credenciales")
     print("=" * 50)
     print()
-    print("Las credenciales se guardan en su perfil de Windows:")
-    print(f"  {user_credentials_env_path()}")
-    print("El fichero quedara oculto y NO se pierde al actualizar el codigo.")
-    print("Las contraseñas se guardan tambien en Windows Credential Manager.")
+    print("Las credenciales se guardan en la carpeta del proyecto:")
+    print(f"  {env_path}")
+    print("El fichero .env no se versiona (esta en .gitignore).")
+    print("Las contraseñas tambien pueden guardarse en Windows Credential Manager.")
     print()
 
     existing = _read_existing()
@@ -112,12 +96,9 @@ def main() -> int:
         print("[ERROR] Credenciales BC incompletas.")
         return 1
 
-    path = user_credentials_env_path()
-    # Guardar servidores/usuarios en fichero; passwords tambien (perfil local oculto)
-    # y duplicar passwords en Credential Manager.
     content = "\n".join(
         [
-            "# Credenciales locales CALCULO_BIOMASA (no compartir)",
+            "# Credenciales locales CALCULO_BIOMASA (no compartir / no versionar)",
             f"DB_SERVER={db_server}",
             f"DB_NAME={db_name}",
             f"DB_USER={db_user}",
@@ -129,8 +110,12 @@ def main() -> int:
             "",
         ]
     )
-    path.write_text(content, encoding="utf-8")
-    hide_windows_file(path)
+    try:
+        env_path.write_text(content, encoding="utf-8")
+    except OSError as exc:
+        print(f"[ERROR] No se pudo escribir {env_path}")
+        print(f"        {exc}")
+        return 1
 
     keyring_ok = True
     keyring_ok &= keyring_set(DEFAULT_INNOVA_CRED_TARGET, "user", db_user)
@@ -141,13 +126,13 @@ def main() -> int:
     keyring_ok &= keyring_set(DEFAULT_BC_CRED_TARGET, "password", bc_password)
 
     print()
-    print(f"[OK] Guardado (oculto): {path}")
+    print(f"[OK] Guardado: {env_path}")
     if keyring_ok:
-        print("[OK] Contraseñas en Windows Credential Manager.")
+        print("[OK] Contraseñas tambien en Windows Credential Manager.")
     else:
-        print("[AVISO] Keyring no disponible; use solo el fichero oculto.")
+        print("[AVISO] Keyring no disponible; se usan solo las del .env del proyecto.")
     print()
-    print("Ya puede generar informes sin volver a crear .env en la carpeta del proyecto.")
+    print("Ya puede generar informes desde esta carpeta.")
     return 0
 
 

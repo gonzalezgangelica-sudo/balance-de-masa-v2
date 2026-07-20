@@ -24,7 +24,7 @@ Mecanismo oficial de distribución: carpeta del proyecto + scripts `.bat`.
 - Windows 10/11
 - **Python 3.11+** instalado (marcar *Add python.exe to PATH*)
 - Red corporativa a **Innova** y **Business Central**
-- Permiso de escritura en la carpeta del proyecto (`.venv`, `Reports\`) y en `%LOCALAPPDATA%`
+- Permiso de escritura en la carpeta del proyecto (`.venv`, `Reports\`, `.env`)
 
 ### 1. Distribuir la aplicación
 
@@ -35,7 +35,7 @@ Mecanismo oficial de distribución: carpeta del proyecto + scripts `.bat`.
 3. Opcional: clonar desde Git si el equipo tiene acceso al repositorio.
 
 Archivos que **sí** se distribuyen: código `.py`, `.bat`, `requirements.txt`, `.env.example`, `PREMISAS.md`, `stolt_logo.svg`, etc.  
-Archivos **locales** (no versionar / no compartir): `.venv\`, `Reports\*.html`, `.env` (si se usa), credenciales en `%LOCALAPPDATA%`.
+Archivos **locales** (no versionar / no compartir): `.venv\`, `Reports\*.html`, `.env`.
 
 ### 2. Instalación en cada puesto (una vez)
 
@@ -47,12 +47,12 @@ configurar_credenciales.bat
 1. `crear_entorno.bat` — comprueba Python, crea `.venv`, instala dependencias  
 2. `configurar_credenciales.bat` — **solo la primera vez** (o si cambian passwords)
 
-**No hay que rehacer el `.env` al actualizar el código.** Las credenciales viven fuera de la carpeta del proyecto, ocultas:
+Las credenciales quedan en la **misma carpeta del proyecto**:
 
-`%LOCALAPPDATA%\Stolt\CALCULO_BIOMASA\credentials.env`
+`.env`
 
-También se guardan en **Windows Credential Manager** (vía `keyring`).  
-Si ya existe un `.env` en el proyecto, el configurador lo puede reutilizar como valores iniciales.
+También se pueden guardar en **Windows Credential Manager** (vía `keyring`).  
+Plantilla sin secretos: `.env.example`.
 
 ### 3. Generar un informe
 
@@ -76,15 +76,14 @@ ejecutar_reporte.bat
 
 Al terminar bien, abre el HTML más reciente de `Reports\`.
 
-### 4. Credenciales (ocultas y persistentes)
+### 4. Credenciales (locales al proyecto)
 
 | Dónde | Qué guarda |
 |-------|------------|
-| `%LOCALAPPDATA%\Stolt\CALCULO_BIOMASA\credentials.env` | Servidores, usuarios y passwords (**fichero oculto**) |
-| Windows Credential Manager | Passwords Innova/BC |
-| `.env` en la carpeta (opcional) | Compatibilidad; **no se versiona** |
+| `.env` en la carpeta del proyecto | Servidores, usuarios y passwords (**no se versiona**) |
+| Windows Credential Manager | Passwords Innova/BC (opcional) |
 
-Prioridad de carga: perfil de usuario → `.env` del proyecto → keyring.
+Prioridad de carga: `.env` del proyecto → keyring.
 
 Para cambiar passwords: `configurar_credenciales.bat` (Enter mantiene el valor actual).  
 Plantilla sin secretos: `.env.example`.
@@ -93,12 +92,13 @@ Plantilla sin secretos: `.env.example`.
 
 | Síntoma | Qué hacer |
 |---------|-----------|
-| *No se encontro Python* | Instalar Python 3.11+ con PATH |
+| *No se encontro Python* | Instalar Python 3.11+ o indicar la ruta en `crear_entorno.bat` |
 | Error de login Innova/BC | Ejecutar `configurar_credenciales.bat` y revisar red/VPN |
 | Timeout BC | Normal en redes lentas; reintentar o subir `BC_TIMEOUT` |
 | No abre el HTML | Mirar `Reports\reporte_biomasa_*.html` y abrirlo a mano |
 | Ejecución desde `\\servidor\share` | Mapear letra de unidad o copiar a disco local |
-| Credenciales perdidas tras actualizar codigo | No deberian perderse: estan en `%LOCALAPPDATA%` |
+| Permission denied en AppData | Ya no se usa AppData; todo va en `.env` de la carpeta del proyecto |
+| Credenciales tras actualizar codigo | Conservar el `.env` local al copiar/actualizar el codigo |
 
 ---
 
@@ -267,12 +267,10 @@ CALCULO_BIOMASA/
 ├── README.md
 ├── requirements.txt
 ├── .env.example                    # Plantilla (sin secretos)
+├── .env                            # Credenciales locales (NO versionar)
 ├── stolt_logo.svg
 ├── Reports/                        # HTML generados (gitignored)
 └── logs/                           # Errores (gitignored)
-
-# Fuera del proyecto (por usuario Windows):
-# %LOCALAPPDATA%\Stolt\CALCULO_BIOMASA\credentials.env  (oculto)
 ```
 
 ---
