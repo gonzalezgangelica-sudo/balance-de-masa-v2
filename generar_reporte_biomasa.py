@@ -3961,14 +3961,16 @@ def render_html(
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <style>
     :root {{
-      --bg: #f3f7f7;
+      --bg: #eef4f8;
       --card: #ffffff;
-      --ink: #1e293b;
-      --muted: #5b677a;
-      --brand: #0b6e4f;
-      --accent: #f59e0b;
+      --ink: #0b2740;
+      --muted: #4a657a;
+      --brand: #003b5c;
+      --brand-mid: #005f87;
+      --brand-light: #00a3c8;
+      --accent: #c8102e;
       --danger: #b42318;
-      --line: #dbe3ea;
+      --line: #c9d9e6;
     }}
     * {{ box-sizing: border-box; }}
     body {{
@@ -3976,17 +3978,18 @@ def render_html(
       font-family: "Segoe UI", Tahoma, sans-serif;
       color: var(--ink);
       background:
-        radial-gradient(circle at 20% 0%, #dff7ec 0%, transparent 35%),
-        radial-gradient(circle at 90% 10%, #fff1d6 0%, transparent 30%),
+        radial-gradient(circle at 18% 0%, #d4eaf5 0%, transparent 38%),
+        radial-gradient(circle at 92% 8%, #fde8eb 0%, transparent 28%),
         var(--bg);
     }}
     .wrap {{ max-width: 1400px; margin: 0 auto; padding: 24px; }}
     .head {{
-      background: linear-gradient(135deg, #0f766e, #0b6e4f);
-      color: #fff;
+      background: linear-gradient(135deg, #003b5c 0%, #005f87 55%, #0077a3 100%);
+      color: #ffffff;
       border-radius: 18px;
       padding: 24px;
-      box-shadow: 0 10px 26px rgba(11, 110, 79, 0.22);
+      box-shadow: 0 10px 26px rgba(0, 59, 92, 0.28);
+      border-bottom: 4px solid var(--accent);
     }}
     .head-top {{
       display: flex;
@@ -3994,8 +3997,30 @@ def render_html(
       align-items: flex-start;
       gap: 12px;
     }}
-    .head h1 {{ margin: 0 0 8px 0; font-size: 30px; }}
-    .head p {{ margin: 0; opacity: 0.95; }}
+    .head h1 {{
+      margin: 0 0 8px 0;
+      font-size: 30px;
+      color: #ffffff;
+      font-weight: 700;
+      letter-spacing: 0.01em;
+      text-shadow: 0 1px 2px rgba(0, 20, 40, 0.35);
+    }}
+    .head p {{
+      margin: 6px 0 0 0;
+      color: #ffffff;
+      font-size: 15px;
+      line-height: 1.45;
+      opacity: 1;
+    }}
+    .head p strong {{
+      color: #ffffff;
+      font-weight: 700;
+    }}
+    .head .muted {{
+      color: #e2f3fa;
+      font-size: 14px;
+      opacity: 1;
+    }}
     .head-main {{
       display: flex;
       align-items: center;
@@ -4007,7 +4032,7 @@ def render_html(
       background: #ffffff;
       border-radius: 8px;
       padding: 4px 6px;
-      box-shadow: 0 2px 10px rgba(2, 6, 23, 0.18);
+      box-shadow: 0 2px 10px rgba(0, 20, 40, 0.25);
     }}
     .grid {{
       margin-top: 16px;
@@ -4067,9 +4092,9 @@ def render_html(
       background: #f8fafc;
     }}
     .btn-export {{
-      border: 1px solid #1f7a4d;
-      background: #e8f6ee;
-      color: #0f5132;
+      border: 1px solid var(--brand-mid);
+      background: #e6f4fa;
+      color: var(--brand);
       border-radius: 8px;
       padding: 6px 10px;
       font-size: 12px;
@@ -4081,10 +4106,17 @@ def render_html(
       white-space: nowrap;
     }}
     .btn-export:hover {{
-      background: #d8f0e2;
+      background: #d2ebf5;
     }}
     .btn-export-top {{
       flex-shrink: 0;
+      border-color: #ffffff;
+      background: #ffffff;
+      color: var(--brand);
+      box-shadow: 0 2px 8px rgba(0, 20, 40, 0.2);
+    }}
+    .btn-export-top:hover {{
+      background: #e2f3fa;
     }}
     .excel-icon {{
       width: 16px;
@@ -4093,7 +4125,7 @@ def render_html(
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      background: #1f7a4d;
+      background: var(--accent);
       color: #ffffff;
       font-size: 9px;
       font-weight: 800;
@@ -4127,15 +4159,15 @@ def render_html(
     .muted {{ color: var(--muted); }}
     .premisa-box {{
       margin-top: 14px;
-      background: #f0faf6;
-      border: 1px solid #b8e0cf;
+      background: #eef7fb;
+      border: 1px solid #a9d4e8;
       border-radius: 14px;
       padding: 14px 16px;
     }}
     .premisa-head {{
       margin: 0 0 8px 0;
       font-size: 16px;
-      color: #0f5132;
+      color: var(--brand);
     }}
     .premisa-list {{
       margin: 0 0 10px 0;
@@ -4159,13 +4191,13 @@ def render_html(
       font-variant-numeric: tabular-nums;
     }}
     .check-ok .kpi-value, .balance-formula .check-ok {{
-      color: #0f766e;
+      color: #0a7a4a;
     }}
     .check-warn .kpi-value, .balance-formula .check-warn {{
-      color: #b42318;
+      color: var(--accent);
     }}
     .card.check-ok {{
-      border-color: #6ee7b7;
+      border-color: #86efac;
       background: #ecfdf5;
     }}
     .card.check-warn {{
@@ -4173,7 +4205,7 @@ def render_html(
       background: #fef2f2;
     }}
     .check-warn-cell {{
-      color: #b42318;
+      color: var(--accent);
       font-weight: 600;
     }}
     .nota-alerta-vap-inline {{
@@ -4321,13 +4353,13 @@ def render_html(
       transition: background 0.15s, color 0.15s, border-color 0.15s;
     }}
     .tab-btn:hover {{
-      background: #f1f5f9;
+      background: #e8f3f9;
       color: var(--ink);
     }}
     .tab-btn.active {{
-      background: #e8f6ee;
-      color: #0f5132;
-      border-color: #b8e0cf;
+      background: #d9eef8;
+      color: var(--brand);
+      border-color: #8fc6de;
     }}
     .tab-btn-debug {{
       margin-left: auto;
@@ -4377,11 +4409,11 @@ def render_html(
       vertical-align: middle;
     }}
     .bc-toggle:hover {{
-      background: #f0faf6;
+      background: #e8f3f9;
     }}
     .bc-toggle[aria-expanded='true'] {{
-      background: #e8f6ee;
-      border-color: #b8e0cf;
+      background: #d9eef8;
+      border-color: #8fc6de;
     }}
     .bc-date-row {{
       background: #ffffff;
@@ -4436,7 +4468,7 @@ def render_html(
     .intro-card h2 {{
       margin: 0 0 10px 0;
       font-size: 22px;
-      color: #0f5132;
+      color: var(--brand);
     }}
     .intro-lead {{
       margin: 0 0 16px 0;
@@ -4454,7 +4486,7 @@ def render_html(
     .intro-snapshot h3 {{
       margin: 0 0 8px 0;
       font-size: 15px;
-      color: #0f766e;
+      color: var(--brand-mid);
     }}
     .intro-list {{
       margin: 0;
@@ -4531,7 +4563,6 @@ def render_html(
         </button>
       </div>
       <p>Periodo: <strong>{format_date_es(start)}</strong> a <strong>{format_date_es(end)}</strong></p>
-      <p class="muted">{html.escape(source_definition)}</p>
     </section>
 
     <nav class="tabs-bar" role="tablist" aria-label="Capítulos del informe">
@@ -4776,9 +4807,9 @@ const chartConfigs = {{
     data: {{
       labels,
       datasets: [
-        {{ label: 'Entradas TINA (kg)', data: entrada, borderColor: '#0b6e4f', tension: 0.25, fill: false }},
-        {{ label: 'TINA procesada (kg)', data: consumo, borderColor: '#dc2626', tension: 0.25, fill: false }},
-        {{ label: 'Salidas CAJA (kg)', data: salida, borderColor: '#2563eb', tension: 0.25, fill: false }}
+        {{ label: 'Entradas TINA (kg)', data: entrada, borderColor: '#003b5c', tension: 0.25, fill: false }},
+        {{ label: 'TINA procesada (kg)', data: consumo, borderColor: '#c8102e', tension: 0.25, fill: false }},
+        {{ label: 'Salidas CAJA (kg)', data: salida, borderColor: '#00a3c8', tension: 0.25, fill: false }}
       ]
     }},
     options: {{ responsive: true, maintainAspectRatio: false }}
@@ -4787,8 +4818,8 @@ const chartConfigs = {{
     data: {{
       labels,
       datasets: [
-        {{ type: 'bar', label: 'Diferencia diaria', data: diferencia, backgroundColor: diferencia.map(v => v >= 0 ? 'rgba(11,110,79,.7)' : 'rgba(180,35,24,.7)') }},
-        {{ type: 'line', label: 'Acumulado diferencia', data: acumulado, borderColor: '#7c3aed', tension: 0.2, yAxisID: 'y1' }}
+        {{ type: 'bar', label: 'Diferencia diaria', data: diferencia, backgroundColor: diferencia.map(v => v >= 0 ? 'rgba(0,95,135,.7)' : 'rgba(200,16,46,.7)') }},
+        {{ type: 'line', label: 'Acumulado diferencia', data: acumulado, borderColor: '#00a3c8', tension: 0.2, yAxisID: 'y1' }}
       ]
     }},
     options: {{
@@ -4810,7 +4841,7 @@ const chartConfigs = {{
           {max(k.get('kg_merma', 0), 0):.2f},
           {k['kg_salida_no_tina']:.2f}
         ],
-        backgroundColor: ['#0b6e4f', '#f59e0b', '#2563eb']
+        backgroundColor: ['#003b5c', '#c8102e', '#00a3c8']
       }}]
     }},
     options: {{ responsive: true, maintainAspectRatio: false }}
@@ -4820,8 +4851,8 @@ const chartConfigs = {{
     data: {{
       labels,
       datasets: [
-        {{ label: 'Stock de tinas', data: stockEntrada, borderColor: '#0b6e4f', tension: 0.25, fill: false }},
-        {{ label: 'Merma (balance)', data: merma, borderColor: '#f59e0b', tension: 0.25, fill: false }}
+        {{ label: 'Stock de tinas', data: stockEntrada, borderColor: '#003b5c', tension: 0.25, fill: false }},
+        {{ label: 'Merma (balance)', data: merma, borderColor: '#c8102e', tension: 0.25, fill: false }}
       ]
     }},
     options: {{ responsive: true, maintainAspectRatio: false }}
@@ -4833,7 +4864,7 @@ const chartConfigs = {{
       datasets: [{{
         label: 'Diferencia entre entradas y salidas',
         data: balance,
-        backgroundColor: balance.map(v => v >= 0 ? 'rgba(37,99,235,.75)' : 'rgba(245,158,11,.75)')
+        backgroundColor: balance.map(v => v >= 0 ? 'rgba(0,95,135,.75)' : 'rgba(200,16,46,.75)')
       }}]
     }},
     options: {{ responsive: true, maintainAspectRatio: false }}

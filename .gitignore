@@ -8,7 +8,7 @@ __pycache__/
 *.py[cod]
 *.pyo
 
-# Salidas generadas (regenerar con generar_reporte_biomasa.py / exportar_contraste_mes.py)
+# Salidas generadas (regenerar con generar_reporte_biomasa.py)
 Reports/*
 !Reports/.gitkeep
 logs/*.log
