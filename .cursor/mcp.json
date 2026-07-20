@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "gpdoc": {
+      "command": "node",
+      "args": [
+        "c:\\Users\\JZN\\.cursor\\extensions\\repetere.gpdoc-3.10.0-universal\\out\\mcp-server.js"
+      ]
+    }
+  }
+}

@@ -1,41 +1,102 @@
 @echo off
-setlocal EnableExtensions
+setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
 
 echo ========================================
 echo  CALCULO_BIOMASA - Instalacion entorno
 echo ========================================
 echo.
+echo  Python no tiene por que estar en el PATH del sistema.
+echo  Indique la ruta completa a python.exe ^(o pulse Enter si
+echo  acepta la sugerencia detectada / guardada^).
+echo.
 
-REM Comprobar Python (py launcher o python)
-set "PYEXE="
-where py >nul 2>&1
-if %ERRORLEVEL% EQU 0 (
-  set "PYEXE=py -3"
-) else (
-  where python >nul 2>&1
-  if %ERRORLEVEL% EQU 0 (
-    set "PYEXE=python"
+set "PYFILE="
+set "SUGGESTED="
+set "PATH_CFG=%~dp0.python_path"
+
+REM --- 1) Ruta guardada en .python_path ---
+if exist "%PATH_CFG%" (
+  set /p SUGGESTED=<"%PATH_CFG%"
+  set "SUGGESTED=!SUGGESTED:"=!"
+  if defined SUGGESTED if not exist "!SUGGESTED!" (
+    echo [AVISO] La ruta guardada ya no existe: !SUGGESTED!
+    set "SUGGESTED="
   )
 )
 
-if not defined PYEXE (
-  echo [ERROR] No se encontro Python 3 en el PATH.
-  echo         Instale Python 3.11+ desde https://www.python.org/downloads/
-  echo         y marque "Add python.exe to PATH".
+REM --- 2) Si no hay guardada, intentar detectar en PATH ---
+if not defined SUGGESTED (
+  where py >nul 2>&1
+  if !ERRORLEVEL! EQU 0 (
+    for /f "delims=" %%P in ('where py 2^>nul') do (
+      if not defined SUGGESTED set "SUGGESTED=%%P"
+    )
+  )
+)
+if not defined SUGGESTED (
+  where python >nul 2>&1
+  if !ERRORLEVEL! EQU 0 (
+    for /f "delims=" %%P in ('where python 2^>nul') do (
+      REM Evitar el stub de WindowsApps si hay otra entrada real
+      echo %%P | findstr /i /c:"\WindowsApps\python.exe" >nul
+      if errorlevel 1 (
+        if not defined SUGGESTED set "SUGGESTED=%%P"
+      ) else (
+        if not defined SUGGESTED set "SUGGESTED=%%P"
+      )
+    )
+  )
+)
+
+if defined SUGGESTED (
+  echo [INFO] Sugerencia: !SUGGESTED!
+  echo.
+  set /p CONFIRM=Usar esta ruta? [S/n]: 
+  if /i "!CONFIRM!"=="n" (
+    set "SUGGESTED="
+  ) else if /i "!CONFIRM!"=="no" (
+    set "SUGGESTED="
+  ) else (
+    set "PYFILE=!SUGGESTED!"
+  )
+)
+
+if not defined PYFILE (
+  echo.
+  echo Ejemplos:
+  echo   C:\Users\%USERNAME%\AppData\Local\Programs\Python\Python313\python.exe
+  echo   C:\Users\%USERNAME%\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\python.exe
+  echo.
+  set /p PYFILE=Ruta completa a python.exe: 
+  set "PYFILE=!PYFILE:"=!"
+)
+
+if not defined PYFILE (
+  echo [ERROR] No se indico ninguna ruta de Python.
   exit /b 1
 )
 
-echo [INFO] Python detectado: %PYEXE%
-%PYEXE% --version
-if errorlevel 1 (
-  echo [ERROR] No se pudo ejecutar Python.
+if not exist "!PYFILE!" (
+  echo [ERROR] No existe el fichero: !PYFILE!
+  echo         Compruebe la ruta e intente de nuevo.
   exit /b 1
 )
+
+echo [INFO] Comprobando Python: !PYFILE!
+"!PYFILE!" --version
+if errorlevel 1 (
+  echo [ERROR] No se pudo ejecutar ese python.exe
+  exit /b 1
+)
+
+> "%PATH_CFG%" echo !PYFILE!
+echo [INFO] Ruta guardada en .python_path ^(local, no se sube a git^).
+echo.
 
 if not exist ".venv\Scripts\python.exe" (
   echo [INFO] Creando entorno virtual .venv ...
-  %PYEXE% -m venv .venv
+  "!PYFILE!" -m venv .venv
   if errorlevel 1 (
     echo [ERROR] Fallo al crear el entorno virtual.
     exit /b 1

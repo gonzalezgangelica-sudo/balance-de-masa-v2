@@ -249,14 +249,93 @@ def format_date_es(value: dt.date) -> str:
 
 
 def parse_user_date(value: str) -> dt.date:
-    value = value.strip()
+    """Parsea dd/mm/aaaa (tambien dd-mm-aaaa / aaaa-mm-dd). Rechaza dias inexistentes (p.ej. 31/06)."""
+    raw = (value or "").strip()
+    if not raw:
+        raise ValueError("Fecha vacia. Use formato dd/mm/aaaa (ejemplo: 31/03/2026).")
+
     formats = ["%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d"]
+    calendar_errors: list[str] = []
     for fmt in formats:
         try:
-            return dt.datetime.strptime(value, fmt).date()
-        except ValueError:
+            parsed = dt.datetime.strptime(raw, fmt).date()
+            # Comprobacion de ida y vuelta: evita ambiguedades residuales.
+            if parsed.strftime(fmt) != dt.datetime.strptime(raw, fmt).strftime(fmt):
+                continue
+            return parsed
+        except ValueError as exc:
+            msg = str(exc).lower()
+            if "day is out of range" in msg or "month must be in" in msg or "unconverted data" in msg:
+                calendar_errors.append(str(exc))
             continue
-    raise ValueError(f"Fecha invalida: {value}. Use formato dd/mm/aaaa")
+
+    # Si el patron parece dd/mm/aaaa pero el dia/mes no existe en el calendario.
+    for sep in ("/", "-"):
+        parts = raw.split(sep)
+        if len(parts) == 3 and all(p.isdigit() for p in parts):
+            # dd/mm/yyyy o yyyy-mm-dd
+            if len(parts[0]) == 4:
+                year, month, day = int(parts[0]), int(parts[1]), int(parts[2])
+            else:
+                day, month, year = int(parts[0]), int(parts[1]), int(parts[2])
+            if not (1 <= month <= 12):
+                raise ValueError(
+                    f"Fecha invalida: {raw}. El mes {month} no existe. Use dd/mm/aaaa."
+                )
+            max_day = calendar.monthrange(year, month)[1]
+            if not (1 <= day <= max_day):
+                raise ValueError(
+                    f"Fecha invalida: {raw}. El dia {day:02d} no existe en "
+                    f"{month:02d}/{year} (ese mes tiene {max_day} dias)."
+                )
+            break
+
+    raise ValueError(
+        f"Fecha invalida: {raw}. Use formato dd/mm/aaaa "
+        f"(ejemplo: 01/03/2026). No se admiten dias inexistentes (31/06)."
+    )
+
+
+def parse_date_range(start_raw: str, end_raw: str) -> tuple[dt.date, dt.date]:
+    start = parse_user_date(start_raw)
+    end = parse_user_date(end_raw)
+    if end < start:
+        raise ValueError(
+            f"La fecha fin ({format_date_es(end)}) no puede ser menor que "
+            f"la fecha inicio ({format_date_es(start)})."
+        )
+    return start, end
+
+
+def resolve_dates(args: argparse.Namespace) -> tuple[dt.date, dt.date]:
+  if args.start and args.end:
+    return parse_date_range(args.start, args.end)
+
+  start_default = None
+  end_default = None
+  if args.start:
+    try:
+      start_default = format_date_es(parse_user_date(args.start))
+    except ValueError as exc:
+      print(f"[AVISO] {exc}")
+  if args.end:
+    try:
+      end_default = format_date_es(parse_user_date(args.end))
+    except ValueError as exc:
+      print(f"[AVISO] {exc}")
+
+  print("Ingrese el rango de fechas para el reporte")
+  print("(formato dd/mm/aaaa; no se admiten dias inexistentes, p.ej. 31/06)")
+  while True:
+    start_raw = prompt_with_default("Fecha inicio (dd/mm/aaaa)", start_default)
+    end_raw = prompt_with_default("Fecha fin (dd/mm/aaaa)", end_default)
+    try:
+      return parse_date_range(start_raw, end_raw)
+    except ValueError as exc:
+      print(f"[ERROR] {exc}")
+      print("Vuelva a introducir las fechas.\n")
+      start_default = None
+      end_default = None
 
 
 def parse_stock_inicial_arg(value: str | None) -> tuple[float | None, bool]:
@@ -450,27 +529,6 @@ def finalize_balance_kpis(report_data: dict[str, Any]) -> None:
         row["kg_merma"] = (
             row["kg_entrada_tina"] - row["kg_salida_no_tina"] - stock_tinas_dia
         )
-
-
-def resolve_dates(args: argparse.Namespace) -> tuple[dt.date, dt.date]:
-  if args.start and args.end:
-    start = parse_user_date(args.start)
-    end = parse_user_date(args.end)
-    if end < start:
-      raise ValueError("La fecha fin no puede ser menor que la fecha inicio")
-    return start, end
-
-  start_default = format_date_es(parse_user_date(args.start)) if args.start else None
-  end_default = format_date_es(parse_user_date(args.end)) if args.end else None
-
-  print("Ingrese el rango de fechas para el reporte")
-  start_raw = prompt_with_default("Fecha inicio (dd/mm/aaaa)", start_default)
-  end_raw = prompt_with_default("Fecha fin (dd/mm/aaaa)", end_default)
-  start = parse_user_date(start_raw)
-  end = parse_user_date(end_raw)
-  if end < start:
-      raise ValueError("La fecha fin no puede ser menor que la fecha inicio")
-  return start, end
 
 
 def resolve_db_credentials(args: argparse.Namespace) -> tuple[str, str]:

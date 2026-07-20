@@ -1,5 +1,5 @@
 @echo off
-setlocal EnableExtensions
+setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
 
 if not exist ".venv\Scripts\python.exe" (
@@ -22,6 +22,7 @@ if not exist "%USER_CREDS%" if not exist ".env" (
 set "START_DATE=%~1"
 set "END_DATE=%~2"
 
+:ask_dates
 if "%START_DATE%"=="" (
   set /p START_DATE=Fecha inicio dd/mm/aaaa: 
 )
@@ -38,6 +39,18 @@ if "%END_DATE%"=="" (
   echo [ERROR] Debe indicar fecha de fin.
   echo Uso: ejecutar_reporte.bat DD/MM/AAAA DD/MM/AAAA
   exit /b 1
+)
+
+REM Validar fechas de calendario ^(rechaza p.ej. 31/06^) antes de lanzar el informe
+".venv\Scripts\python.exe" -c "from generar_reporte_biomasa import parse_date_range; s,e=parse_date_range(r'%START_DATE%', r'%END_DATE%'); print('OK', s.isoformat(), e.isoformat())"
+if errorlevel 1 (
+  echo.
+  echo [ERROR] Fechas no validas. No se admiten dias inexistentes ^(ejemplo: 31/06^).
+  echo         Formato: dd/mm/aaaa  ^|  La fecha fin no puede ser anterior al inicio.
+  echo.
+  set "START_DATE="
+  set "END_DATE="
+  goto ask_dates
 )
 
 echo.

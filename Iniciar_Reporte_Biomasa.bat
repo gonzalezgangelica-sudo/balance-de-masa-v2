@@ -9,6 +9,7 @@ echo  CALCULO_BIOMASA - Stolt Sea Farm
 echo ========================================
 echo.
 echo  1. Instalar / reparar entorno
+echo     (pide ruta a python.exe si no esta en PATH)
 echo  2. Configurar credenciales (ocultas)
 echo  3. Generar reporte (pide fechas)
 echo  4. Abrir ultimo reporte HTML
