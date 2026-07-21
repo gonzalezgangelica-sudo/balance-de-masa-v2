@@ -566,6 +566,7 @@ Balance de masa en Business Central para **Location Code E y G** unicamente.
 | **Encadenamiento** | Stock final del dia N = stock inicial del dia N+1 |
 | **Salidas Innova** | Salidas CAJA del dia (`proc_packs`, premisa 3) |
 | **Ventas BC** | ILE `[Entry Type] = 1`, `[Posting Date]` del dia, almacenes E/G |
+| **Ajustes negativos** | ILE `[Entry Type] = 3`: marcan **salida del lote** en stock inicial/real (junto con Type 1). **No** restan como flujo aparte en la formula teorica (kg ni cajas) |
 | **Stock apertura** | Empaque anterior al periodo sin venta previa en E/G |
 | **Check** | Stock final teorico − Stock final real |
 | **Alcance check** | Solo lotes con empaque o movimiento ILE en el mes del periodo |

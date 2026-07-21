@@ -831,6 +831,7 @@ PREMISA_BC_BALANCE_EG_REGLAS = (
   "Encadenamiento en cajas: stock final teorico del dia N = stock inicial del dia N+1.",
   "Stock inicial BC E/G por producto: corte a fecha inicio; empaque anterior; venta ese dia o despues; cajas y kg.",
   "Stock final BC E/G por producto: empaque del periodo sin venta hasta fecha fin (pendiente mes siguiente); cajas y kg.",
+  "Ajustes negativos (Entry Type 3): marcan salida del lote en stock inicial/real (junto con venta Type 1); no restan como flujo aparte en la formula teorica (kg: Innova−Ventas; cajas: Entradas Type 2 − Ventas Type 1).",
 )
 
 # Limitacion conocida — debe mostrarse en todos los resultados (ver PREMISAS.md).
@@ -841,12 +842,30 @@ NOTA_ALERTA_VAP = (
 )
 NOTA_ALERTA_VAP_TITULO = "Alerta — limitacion VAP en stock de tinas"
 
+NOTA_BC_AJUSTES_NEGATIVOS = (
+  "Ajustes negativos BC (Entry Type = 3): se usan como salida del lote para stock inicial/real "
+  "(igual que la venta Type 1: el lote deja de estar en almacén). "
+  "No tienen columna propia en el balance teórico: no restan kg/cajas aparte. "
+  "Fórmulas: kg = Inicial + Salidas Innova − Ventas (Type 1); "
+  "cajas = Inicial + Entradas (Type 2) − Ventas (Type 1)."
+)
+NOTA_BC_AJUSTES_NEGATIVOS_TITULO = "Pie — ajustes negativos en balance BC E/G"
+
 
 def build_nota_alerta_vap_html() -> str:
     return (
         "<footer class='nota-alerta-vap' role='note'>"
         f"<p class='nota-alerta-vap-titulo'>{html.escape(NOTA_ALERTA_VAP_TITULO)}</p>"
         f"<p class='nota-alerta-vap-texto'>{html.escape(NOTA_ALERTA_VAP)}</p>"
+        "</footer>"
+    )
+
+
+def build_nota_bc_ajustes_negativos_html() -> str:
+    return (
+        "<footer class='nota-bc-ajustes' role='note'>"
+        f"<p class='nota-bc-ajustes-titulo'>{html.escape(NOTA_BC_AJUSTES_NEGATIVOS_TITULO)}</p>"
+        f"<p class='nota-bc-ajustes-texto'>{html.escape(NOTA_BC_AJUSTES_NEGATIVOS)}</p>"
         "</footer>"
     )
 
@@ -3656,6 +3675,10 @@ def build_bc_balance_eg_section_html(
           Lotes con empaque en el periodo (BC): {bc_balance['lotes_empaque_mes']:,}.
           Tolerancia check: ±{fmt_num(BC_BALANCE_CHECK_TOLERANCE_KG, 0)} kg.
         </p>
+        <p class="premisa-note nota-bc-ajustes-inline">
+          <strong>{html.escape(NOTA_BC_AJUSTES_NEGATIVOS_TITULO)}:</strong>
+          {html.escape(NOTA_BC_AJUSTES_NEGATIVOS)}
+        </p>
       </section>
     """
 
@@ -3852,6 +3875,10 @@ def build_bc_balance_tipo_cajas_section_html(
           </tbody>
         </table>
       </article>
+      <p class="premisa-note nota-bc-ajustes-inline" style="margin-top:14px;">
+        <strong>{html.escape(NOTA_BC_AJUSTES_NEGATIVOS_TITULO)}:</strong>
+        {html.escape(NOTA_BC_AJUSTES_NEGATIVOS)}
+      </p>
     """
 
 
@@ -4248,6 +4275,7 @@ def render_html(
     premisa_entrada_html = build_premisa_entrada_html()
     intro_html = build_report_intro_html(start, end, k, source_definition, bc_loaded)
     nota_alerta_vap_html = build_nota_alerta_vap_html()
+    nota_bc_ajustes_html = build_nota_bc_ajustes_negativos_html()
     trace_tables = ", ".join(sql_trace.get("view_or_tables", []))
     trace_params = sql_trace.get("params", {})
     trace_query_items = []
@@ -4622,6 +4650,34 @@ def render_html(
       font-size: 13px;
       line-height: 1.45;
       color: #78350f;
+    }}
+    .nota-bc-ajustes {{
+      margin: 12px 0 8px 0;
+      padding: 14px 16px;
+      border: 1px solid #8fc6de;
+      border-radius: 12px;
+      background: #eef7fb;
+    }}
+    .nota-bc-ajustes-titulo {{
+      margin: 0 0 6px 0;
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--brand);
+    }}
+    .nota-bc-ajustes-texto {{
+      margin: 0;
+      font-size: 13px;
+      line-height: 1.45;
+      color: #0b2740;
+    }}
+    .nota-bc-ajustes-inline {{
+      margin-top: 10px;
+      padding: 10px 12px;
+      border-left: 4px solid var(--brand-mid);
+      background: #eef7fb;
+      color: #0b2740;
+      font-size: 13px;
+      line-height: 1.45;
     }}
     .trace-box {{
       margin-top: 18px;
