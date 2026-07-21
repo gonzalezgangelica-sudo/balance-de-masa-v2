@@ -222,6 +222,9 @@ Con el entorno ya creado:
 .venv\Scripts\python.exe generar_reporte_biomasa.py --start 01/04/2026 --end 30/04/2026
 .venv\Scripts\python.exe generar_reporte_biomasa.py --start 01/04/2026 --end 30/04/2026 --skip-bc
 .venv\Scripts\python.exe generar_reporte_biomasa.py --start 01/03/2026 --end 31/03/2026 --arrastre-mensual
+
+# Contraste lote Innova (prday/weight) vs BC (Fecha empaque/Kilos)
+.venv\Scripts\python.exe contrastar_lote_innova_bc.py --start 01/04/2026 --end 30/04/2026
 ```
 
 ### Otros scripts
@@ -229,6 +232,7 @@ Con el entorno ya creado:
 | Script | Uso |
 |--------|-----|
 | `generar_reporte_biomasa.py` | Informe principal |
+| `contrastar_lote_innova_bc.py` | Contraste por lote: Innova prday/weight vs BC Fecha empaque/Kilos |
 | `validar_dia_salidas.py` | Validación puntual salidas ↔ BC por día |
 | `generar_documento_funcional.py` | Regenera `DOCUMENTO_FUNCIONAL_BIOMASA.docx` |
 

@@ -415,6 +415,24 @@ Cruce **por lote/caja** entre salidas Innova y ventas en Business Central (BC). 
 
 > **Implementacion actual en codigo:** el detalle Innova del cruce agrupa lotes por `proc_packs.regtime` (legacy). Las **metricas de salida del periodo** usaran `prday` (premisa 3) cuando se actualice el script; el **enlace y la logica BC** no cambian.
 
+### Premisa hibrida (plan API BC + enriquecimiento Innova)
+
+Objetivo: si BC se consume por **API** (sin campos custom `[Fecha empaque]` / `[Kilos]`), enriquecer cada lote con Innova uniendo por el mismo codigo de lote.
+
+| Campo necesario en balance / stock | Origen preferido (hibrido) | Origen actual (SQL BC) |
+|------------------------------------|----------------------------|-------------------------|
+| Identificador lote | BC `Lot No.` / API `lotNumber` = Innova `proc_packs.number` | Igual |
+| Movimiento (venta / ajuste+) | BC API: Entry Type, Location E/G, Quantity, Posting Date | ILE SQL |
+| **Kg** | Innova `SUM(proc_packs.weight)` del lote | `ABS(ILE.[Kilos])` |
+| **Fecha empaque** | Innova `MIN(proc_packs.prday)` (CAJA, premisa 3) | `ILE.[Fecha empaque]` |
+| **Fecha despesque** | `vw_stolt.fdespesque` (si hay enlace al lote/material); si no, N/D | No usado hoy en balance E/G |
+
+**Alcance:** solo lotes CAJA Innova con `number` informado. Lotes solo presentes en BC (stock antiguo sin pack Innova) no tendran `prday`/`weight`.
+
+**Validacion:** script `contrastar_lote_innova_bc.py` compara por lote `prday`/`weight` vs `[Fecha empaque]`/`[Kilos]` (mes de referencia). Resultados en `Reports/contraste_lote_innova_bc_*.md`.
+
+**Estado:** documentado y contrastable; el informe principal **sigue** usando campos BC SQL hasta decidir el corte a API/hibrido.
+
 ### SQL Innova — lotes de salida con codigo (lado enlace)
 
 Alineado a premisa 3 (`prday`, `rtype = 1`):
