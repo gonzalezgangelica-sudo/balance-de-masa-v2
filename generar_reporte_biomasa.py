@@ -5231,6 +5231,7 @@ def render_html(
     </div>
 
     {nota_alerta_vap_html}
+    {nota_bc_ajustes_html}
 
     <div id="chartModal" class="chart-modal" aria-hidden="true">
       <div class="chart-modal-content" role="dialog" aria-modal="true" aria-labelledby="chartModalTitle">
