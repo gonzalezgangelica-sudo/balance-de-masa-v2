@@ -829,6 +829,8 @@ PREMISA_BC_BALANCE_EG_REGLAS = (
   "Desglose por tipo de producto BC (Cod. producto via Conversion productos: Cod. bascula = material Innova) y lote.",
   "Balance por tipo en cajas: Entradas = ajustes positivos BC (Entry Type 2); Ventas = ventas BC (Entry Type 1); agregadas por Cod. producto.",
   "Encadenamiento en cajas: stock final teorico del dia N = stock inicial del dia N+1.",
+  "Stock inicial BC E/G por producto: corte a fecha inicio; empaque anterior; venta ese dia o despues; cajas y kg.",
+  "Stock final BC E/G por producto: empaque del periodo sin venta hasta fecha fin (pendiente mes siguiente); cajas y kg.",
 )
 
 # Limitacion conocida — debe mostrarse en todos los resultados (ver PREMISAS.md).
@@ -2380,6 +2382,76 @@ def build_bc_balance_por_tipo_cajas(
     return result, detalle_diario_cajas
 
 
+def build_bc_stock_snapshot_por_producto(
+    lot_detalle: list[dict[str, Any]],
+    start: dt.date,
+    end: dt.date,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
+    """Stock inicial (fecha inicio) y stock final pendiente (empaque del periodo) por producto.
+
+    Stock inicial: empaque < start y salida >= start (o sin salida).
+    Stock final: empaque en [start, end] y sin venta hasta end (pendiente mes siguiente).
+    Almacenes E/G (ya filtrados en ILE). Unidades: 1 lote = 1 caja; kg = kg BC del lote.
+    """
+    inicial: dict[str, dict[str, Any]] = {}
+    final: dict[str, dict[str, Any]] = {}
+
+    def _bucket(store: dict[str, dict[str, Any]], row: dict[str, Any]) -> dict[str, Any]:
+        key = str(row.get("tipo_key") or row.get("cod_producto") or row.get("item_no") or "(sin tipo)").strip()
+        if not key:
+            key = "(sin tipo)"
+        bucket = store.setdefault(
+            key,
+            {
+                "tipo_key": key,
+                "tipo_nombre": str(row.get("tipo_nombre") or key),
+                "cod_producto": str(row.get("cod_producto") or key),
+                "material": str(row.get("material") or ""),
+                "pattern": str(row.get("pattern") or ""),
+                "item_no": str(row.get("item_no") or ""),
+                "cajas": 0,
+                "kg": 0.0,
+                "lotes": 0,
+            },
+        )
+        if not bucket.get("tipo_nombre") and row.get("tipo_nombre"):
+            bucket["tipo_nombre"] = str(row.get("tipo_nombre"))
+        if not bucket.get("material") and row.get("material"):
+            bucket["material"] = str(row.get("material") or "")
+        if not bucket.get("pattern") and row.get("pattern"):
+            bucket["pattern"] = str(row.get("pattern") or "")
+        return bucket
+
+    for row in lot_detalle:
+        fe = row.get("fe_empaque")
+        out = row.get("first_sale")
+        kg = to_float(row.get("kg_bc"))
+        if _lot_in_stock_inicial(fe, out, start):
+            b = _bucket(inicial, row)
+            b["cajas"] += 1
+            b["kg"] += kg
+            b["lotes"] += 1
+
+        fe_d = sql_row_to_date(fe)
+        if fe_d is not None and start <= fe_d <= end and _lot_in_stock_final(fe, out, end):
+            b = _bucket(final, row)
+            b["cajas"] += 1
+            b["kg"] += kg
+            b["lotes"] += 1
+
+    lista_inicial = sorted(inicial.values(), key=lambda r: (-r["kg"], r["tipo_key"]))
+    lista_final = sorted(final.values(), key=lambda r: (-r["kg"], r["tipo_key"]))
+    totals = {
+        "inicial_cajas": sum(int(r["cajas"]) for r in lista_inicial),
+        "inicial_kg": sum(to_float(r["kg"]) for r in lista_inicial),
+        "inicial_productos": len(lista_inicial),
+        "final_cajas": sum(int(r["cajas"]) for r in lista_final),
+        "final_kg": sum(to_float(r["kg"]) for r in lista_final),
+        "final_productos": len(lista_final),
+    }
+    return lista_inicial, lista_final, totals
+
+
 def attach_bc_balance_eg_to_report(
     report_data: dict[str, Any],
     bc_balance: dict[str, Any],
@@ -2493,6 +2565,9 @@ def attach_bc_balance_eg_to_report(
         bc_balance=bc_balance,
         detalle_diario_report=report_data.get("detalle_diario"),
     )
+    stock_inicial_producto, stock_final_producto, stock_producto_totals = (
+        build_bc_stock_snapshot_por_producto(lot_detalle, period_start, period_end)
+    )
 
     cajas_stock_inicial = sum(int(t["cajas_stock_inicial"]) for t in detalle_por_tipo_cajas)
     cajas_entradas = sum(int(t["cajas_entradas"]) for t in detalle_por_tipo_cajas)
@@ -2524,6 +2599,9 @@ def attach_bc_balance_eg_to_report(
         "detalle_por_tipo": detalle_por_tipo,
         "detalle_por_tipo_cajas": detalle_por_tipo_cajas,
         "detalle_diario_cajas": detalle_diario_cajas,
+        "stock_inicial_por_producto": stock_inicial_producto,
+        "stock_final_por_producto": stock_final_producto,
+        "stock_producto_totals": stock_producto_totals,
         "conversion_productos_count": len((conversion_productos or {}).get("by_bascula") or {}),
         "cajas_stock_inicial": cajas_stock_inicial,
         "cajas_entradas": cajas_entradas,
@@ -3777,6 +3855,174 @@ def build_bc_balance_tipo_cajas_section_html(
     """
 
 
+def build_bc_stock_producto_table_rows(detalle: list[dict[str, Any]]) -> str:
+    rows: list[str] = []
+    for tipo in detalle:
+        rows.append(
+            "<tr>"
+            f"<td><code>{html.escape(str(tipo.get('cod_producto') or tipo.get('tipo_key') or '—'))}</code></td>"
+            f"<td>{html.escape(str(tipo.get('tipo_nombre') or '—'))}</td>"
+            f"<td>{html.escape(str(tipo.get('material') or '—'))}</td>"
+            f"<td>{html.escape(str(tipo.get('pattern') or '—'))}</td>"
+            f"<td class='num'>{int(tipo.get('cajas') or 0):,}</td>"
+            f"<td class='num'>{fmt_num(tipo.get('kg', 0))}</td>"
+            f"<td class='num'>{int(tipo.get('lotes') or 0):,}</td>"
+            "</tr>"
+        )
+    return "\n".join(rows) if rows else "<tr><td colspan='7'><em>Sin lotes en este corte.</em></td></tr>"
+
+
+def build_bc_stock_inicial_section_html(
+    start: dt.date,
+    end: dt.date,
+    bc_balance: dict[str, Any] | None,
+) -> str:
+    if not bc_balance or not bc_balance.get("loaded"):
+        return (
+            "<article class='chart-card'>"
+            "<h3>Stock inicial BC E/G por tipo</h3>"
+            "<p class='muted'>BC no disponible (--skip-bc o error de conexion).</p>"
+            "</article>"
+        )
+    detalle = bc_balance.get("stock_inicial_por_producto") or []
+    totals = bc_balance.get("stock_producto_totals") or {}
+    rows_html = build_bc_stock_producto_table_rows(detalle)
+    cajas = int(totals.get("inicial_cajas") or 0)
+    kg = to_float(totals.get("inicial_kg"))
+    nprod = int(totals.get("inicial_productos") or 0)
+    return f"""
+      <section class="grid">
+        <article class="card">
+          <div class="kpi-title">Stock inicial (cajas)</div>
+          <div class="kpi-value">{cajas:,}</div>
+          <div class="kpi-sub">Al {format_date_es(start)} · almacenes E/G · 1 lote = 1 caja</div>
+        </article>
+        <article class="card">
+          <div class="kpi-title">Stock inicial (kg)</div>
+          <div class="kpi-value">{fmt_num(kg)}</div>
+          <div class="kpi-sub">Suma [Kilos] BC de lotes en stock</div>
+        </article>
+        <article class="card">
+          <div class="kpi-title">Productos</div>
+          <div class="kpi-value">{nprod:,}</div>
+          <div class="kpi-sub">Cod. producto / Item No.</div>
+        </article>
+      </section>
+      <article class="chart-card" style="margin-top:14px;">
+        <div class="section-head">
+          <h3>Stock inicial BC E/G por tipo de producto</h3>
+          <button type="button" class="btn-export" data-table-id="bcStockInicialProductoTable" data-file-name="bc_stock_inicial_eg_producto">
+            <span class="excel-icon">X</span>
+            Exportar Excel
+          </button>
+        </div>
+        <p class="muted" style="margin-top:0;">
+          Corte al <strong>{format_date_es(start)}</strong> (fecha inicio del informe).
+          Lotes con <code>[Fecha empaque]</code> &lt; inicio y venta ese dia o despues (o sin venta).
+          Almacenes <strong>E</strong> y <strong>G</strong>.
+        </p>
+        <table id="bcStockInicialProductoTable">
+          <thead>
+            <tr>
+              <th>Cod. producto BC</th>
+              <th>Producto</th>
+              <th>Cod. bascula</th>
+              <th>Pattern</th>
+              <th class="num">Cajas</th>
+              <th class="num">Kg BC</th>
+              <th class="num">Lotes</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows_html}
+            <tr>
+              <td colspan="4"><strong>TOTAL</strong></td>
+              <td class="num"><strong>{cajas:,}</strong></td>
+              <td class="num"><strong>{fmt_num(kg)}</strong></td>
+              <td class="num"><strong>{cajas:,}</strong></td>
+            </tr>
+          </tbody>
+        </table>
+      </article>
+    """
+
+
+def build_bc_stock_final_section_html(
+    start: dt.date,
+    end: dt.date,
+    bc_balance: dict[str, Any] | None,
+) -> str:
+    if not bc_balance or not bc_balance.get("loaded"):
+        return (
+            "<article class='chart-card'>"
+            "<h3>Stock final BC E/G por tipo</h3>"
+            "<p class='muted'>BC no disponible (--skip-bc o error de conexion).</p>"
+            "</article>"
+        )
+    detalle = bc_balance.get("stock_final_por_producto") or []
+    totals = bc_balance.get("stock_producto_totals") or {}
+    rows_html = build_bc_stock_producto_table_rows(detalle)
+    cajas = int(totals.get("final_cajas") or 0)
+    kg = to_float(totals.get("final_kg"))
+    nprod = int(totals.get("final_productos") or 0)
+    return f"""
+      <section class="grid">
+        <article class="card">
+          <div class="kpi-title">Stock final pendiente (cajas)</div>
+          <div class="kpi-value">{cajas:,}</div>
+          <div class="kpi-sub">Al {format_date_es(end)} · empaque del periodo · E/G</div>
+        </article>
+        <article class="card">
+          <div class="kpi-title">Stock final pendiente (kg)</div>
+          <div class="kpi-value">{fmt_num(kg)}</div>
+          <div class="kpi-sub">Sin venta hasta el fin de periodo</div>
+        </article>
+        <article class="card">
+          <div class="kpi-title">Productos</div>
+          <div class="kpi-value">{nprod:,}</div>
+          <div class="kpi-sub">Cod. producto / Item No.</div>
+        </article>
+      </section>
+      <article class="chart-card" style="margin-top:14px;">
+        <div class="section-head">
+          <h3>Stock final BC E/G — empaque del periodo pendiente de venta</h3>
+          <button type="button" class="btn-export" data-table-id="bcStockFinalProductoTable" data-file-name="bc_stock_final_eg_producto">
+            <span class="excel-icon">X</span>
+            Exportar Excel
+          </button>
+        </div>
+        <p class="muted" style="margin-top:0;">
+          Corte al <strong>{format_date_es(end)}</strong> (fecha fin del informe).
+          Solo lotes con empaque entre <strong>{format_date_es(start)}</strong> y <strong>{format_date_es(end)}</strong>
+          que siguen sin vender al cierre (quedan pendientes para el mes siguiente).
+          Almacenes <strong>E</strong> y <strong>G</strong>.
+        </p>
+        <table id="bcStockFinalProductoTable">
+          <thead>
+            <tr>
+              <th>Cod. producto BC</th>
+              <th>Producto</th>
+              <th>Cod. bascula</th>
+              <th>Pattern</th>
+              <th class="num">Cajas</th>
+              <th class="num">Kg BC</th>
+              <th class="num">Lotes</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows_html}
+            <tr>
+              <td colspan="4"><strong>TOTAL</strong></td>
+              <td class="num"><strong>{cajas:,}</strong></td>
+              <td class="num"><strong>{fmt_num(kg)}</strong></td>
+              <td class="num"><strong>{cajas:,}</strong></td>
+            </tr>
+          </tbody>
+        </table>
+      </article>
+    """
+
+
 def _format_bc_posting_range(pedido: dict[str, Any]) -> str:
     date_min = pedido.get("posting_date_min")
     date_max = pedido.get("posting_date_max")
@@ -3929,6 +4175,8 @@ def render_html(
     bc_balance_eg = data.get("bc_balance_eg")
     bc_balance_section_html = build_bc_balance_eg_section_html(start, end, bc_balance_eg)
     bc_balance_tipo_cajas_html = build_bc_balance_tipo_cajas_section_html(start, end, bc_balance_eg)
+    bc_stock_inicial_html = build_bc_stock_inicial_section_html(start, end, bc_balance_eg)
+    bc_stock_final_html = build_bc_stock_final_section_html(start, end, bc_balance_eg)
     bc_loaded = bool(data.get("bc_cruce"))
     bc_note = (
         "Enlace por proc_packs.number = BC Item Ledger Entry [Lot No.]. "
@@ -4700,7 +4948,7 @@ def render_html(
         </div>
         <button type="button" class="btn-export btn-export-top" id="btnExportAll" data-file-name="reporte_biomasa_completo">
           <span class="excel-icon">X</span>
-          Exportar todo en Excel (7 hojas)
+          Exportar todo en Excel
         </button>
       </div>
       <p>Periodo: <strong>{format_date_es(start)}</strong> a <strong>{format_date_es(end)}</strong></p>
@@ -4715,6 +4963,8 @@ def render_html(
       <button type="button" class="tab-btn" role="tab" aria-selected="false" aria-controls="tab-bc" data-tab="tab-bc" id="tab-btn-bc">Cruce BC</button>
       <button type="button" class="tab-btn" role="tab" aria-selected="false" aria-controls="tab-bc-balance" data-tab="tab-bc-balance" id="tab-btn-bc-balance">Balance BC E/G</button>
       <button type="button" class="tab-btn" role="tab" aria-selected="false" aria-controls="tab-bc-tipo-cajas" data-tab="tab-bc-tipo-cajas" id="tab-btn-bc-tipo-cajas">Balance por tipo (cajas)</button>
+      <button type="button" class="tab-btn" role="tab" aria-selected="false" aria-controls="tab-bc-stock-ini" data-tab="tab-bc-stock-ini" id="tab-btn-bc-stock-ini">Stock inicial BC E/G</button>
+      <button type="button" class="tab-btn" role="tab" aria-selected="false" aria-controls="tab-bc-stock-fin" data-tab="tab-bc-stock-fin" id="tab-btn-bc-stock-fin">Stock final BC E/G</button>
       <button type="button" class="tab-btn" role="tab" aria-selected="false" aria-controls="tab-materiales" data-tab="tab-materiales" id="tab-btn-materiales">Materiales</button>
       <button type="button" class="tab-btn tab-btn-debug" role="tab" aria-selected="false" aria-controls="tab-debug" data-tab="tab-debug" id="tab-btn-debug">Debug</button>
     </nav>
@@ -4869,6 +5119,14 @@ def render_html(
 
       <section class="tab-panel" id="tab-bc-tipo-cajas" role="tabpanel" aria-labelledby="tab-btn-bc-tipo-cajas">
         {bc_balance_tipo_cajas_html}
+      </section>
+
+      <section class="tab-panel" id="tab-bc-stock-ini" role="tabpanel" aria-labelledby="tab-btn-bc-stock-ini">
+        {bc_stock_inicial_html}
+      </section>
+
+      <section class="tab-panel" id="tab-bc-stock-fin" role="tabpanel" aria-labelledby="tab-btn-bc-stock-fin">
+        {bc_stock_final_html}
       </section>
 
       <section class="tab-panel" id="tab-materiales" role="tabpanel" aria-labelledby="tab-btn-materiales">
@@ -5132,6 +5390,8 @@ function exportAllTablesToExcel(fileName) {{
     {{ sheetName: 'BC E/G por tipo', tableId: 'bcBalanceEgTipoTable' }},
     {{ sheetName: 'BC diario cajas', tableId: 'bcBalanceDiarioCajasTable' }},
     {{ sheetName: 'BC tipo cajas', tableId: 'bcBalanceTipoCajasTable' }},
+    {{ sheetName: 'Stock ini BC', tableId: 'bcStockInicialProductoTable' }},
+    {{ sheetName: 'Stock fin BC', tableId: 'bcStockFinalProductoTable' }},
     {{ sheetName: 'BC E/G por lote', tableId: 'bcBalanceEgLoteTable' }},
     {{ sheetName: 'Top entrada', tableId: 'topEntradasTable' }},
     {{ sheetName: 'Top salida', tableId: 'topSalidasTable' }}

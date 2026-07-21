@@ -99,6 +99,21 @@ Plantilla sin secretos: `.env.example`. La opción 2 del menú crea `.env` desde
 
 ---
 
+### Acceso multi-usuario Innova (planificado — sin cambio de codigo)
+
+Objetivo: que cada usuario use **su propio** login a Innova, no un usuario compartido (`sa` / servicio).
+
+| Quien | Accion futura |
+|-------|----------------|
+| **DBA / IT** | Crear login SQL por persona (o grupo AD) con `SELECT` solo sobre tablas del informe |
+| **Opcional** | Autenticacion Windows (`Trusted_Connection`) para no guardar password SQL |
+| **Cada usuario** | Ya disponible: `configurar_credenciales.bat` guarda `DB_USER`/`DB_PASSWORD` en su perfil |
+| **Despliegue** | No distribuir `.env` con secretos compartidos |
+
+Estado actual: el mecanismo de credenciales **por puesto** ya existe; falta el alta de usuarios individuales en el servidor Innova (fuera de este repositorio).
+
+---
+
 ## Qué entrega el informe
 
 | Entrega | Descripción |
@@ -117,8 +132,10 @@ Plantilla sin secretos: `.env.example`. La opción 2 del menú crea `.env` desde
 6. **Cruce BC** — Innova ↔ ILE por lote (`number` = `[Lot No.]`)  
 7. **Balance BC E/G** — stock diario almacenes E/G (kg)  
 8. **Balance por tipo (cajas)** — entradas = ajustes + (Type 2); ventas = Sale (Type 1)  
-9. **Materiales** — top entradas / salidas  
-10. **Debug** — trazas SQL (opcional)
+9. **Stock inicial BC E/G** — cajas y kg por tipo de producto a la fecha de inicio  
+10. **Stock final BC E/G** — empaque del periodo pendiente de venta a la fecha de fin  
+11. **Materiales** — top entradas / salidas  
+12. **Debug** — trazas SQL (opcional)
 
 ---
 

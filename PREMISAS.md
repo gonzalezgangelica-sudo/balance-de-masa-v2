@@ -590,6 +590,21 @@ La tabla del informe incluye **todos los dias del mes** (laborables y fines de s
 - **Encadenamiento:** stock final teorico dia N = stock inicial dia N+1.
 - Formula: Stock teorico = Stock inicial + Salidas − Ventas; Check = teorico − real.
 
+### Pestañas Stock inicial / Stock final BC E/G (por tipo)
+
+Almacenes **E** y **G**. Agregado por Cod. producto / `[Item No.]` en **cajas** (1 lote = 1 caja) y **kg** BC (`[Kilos]`).
+
+| Pestaña | Fecha de referencia | Definicion |
+|---------|---------------------|------------|
+| **Stock inicial BC E/G** | Fecha **inicio** del informe | Empaque **anterior** a la fecha inicio; venta/salida ese dia o posterior (o sin venta) |
+| **Stock final BC E/G** | Fecha **fin** del informe | Empaque **dentro del periodo** (inicio–fin) y **sin venta hasta el fin** (pendiente de venta al mes siguiente) |
+
+Ejemplo abril 2026: stock inicial al **01/04/2026**; stock final = empaque en abril aún sin vender al **30/04/2026** (queda pendiente para mayo).
+
+### Acceso multi-usuario Innova (planificado)
+
+Sin cambio de codigo en este repositorio: IT debe crear usuarios SQL (o grupo AD) individuales con solo lectura; cada puesto ya puede guardar su `DB_USER`/`DB_PASSWORD` con `configurar_credenciales.bat`. Ver README.
+
 En la pestaña **Balance BC E/G** hay dos tablas adicionales:
 
 1. **Por tipo de producto** — resumen agrupado con expansion de lotes.
