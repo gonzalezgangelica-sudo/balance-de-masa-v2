@@ -566,7 +566,7 @@ Balance de masa en Business Central para **Location Code E y G** unicamente.
 | **Encadenamiento** | Stock final del dia N = stock inicial del dia N+1 |
 | **Salidas Innova** | Salidas CAJA del dia (`proc_packs`, premisa 3) |
 | **Ventas BC** | ILE `[Entry Type] = 1`, `[Posting Date]` del dia, almacenes E/G |
-| **Ajustes negativos** | ILE `[Entry Type] = 3`: marcan **salida del lote** en stock inicial/real (junto con Type 1). **No** restan como flujo aparte en la formula teorica (kg ni cajas) |
+| **Ajustes negativos** | ILE `[Entry Type] = 3`: marcan **salida del lote** en stock inicial/real (junto con Type 1). En **kg** no restan como flujo aparte. En **cajas** sí restan: Inicial + Entradas (Type 2) − Ventas (Type 1) − Ajustes neg. (Type 3) |
 | **Stock apertura** | Empaque anterior al periodo sin venta previa en E/G |
 | **Check** | Stock final teorico − Stock final real |
 | **Alcance check** | Solo lotes con empaque o movimiento ILE en el mes del periodo |
@@ -582,13 +582,12 @@ En **fines de semana** (y dias sin actividad comercial):
 
 La tabla del informe incluye **todos los dias del mes** (laborables y fines de semana) para mostrar el cierre diario completo.
 
-### Desglose por tipo de producto y lote
+### Desglose por tipo de producto
 
 | Nivel | Clave | Campos |
 |-------|-------|--------|
 | **Tipo producto** | `bc.[Conversion productos].[Cod. producto]` | Enlace: Innova `material` = `Cod. bascula`; fallback `pattern` / `[Item No.]` |
-| **Balance por tipo (cajas)** | Por Cod. producto / `[Item No.]` | Stock inicial / **Entradas BC (ajustes +)** / **Ventas BC** / Stock teorico / Stock real / Check en **nº de cajas** |
-| **Lote** | `proc_packs.number` = BC `[Lot No.]` | Fecha empaque, kg Innova, kg BC, kg ventas, estado (stock final / vendido / apertura) |
+| **Balance por tipo (cajas)** | Por Cod. producto / `[Item No.]` | Stock inicial / **Entradas BC (ajustes +)** / **Ventas BC** / **Ajustes neg.** / Stock teorico / Stock real / Check en **nº de cajas** |
 | **Item BC** | `[Item No.]` / `[Description]` en ILE | Coincide con `Cod. producto` cuando hay conversion |
 
 **Enlace producto Innova ↔ BC:**
@@ -603,11 +602,12 @@ La tabla del informe incluye **todos los dias del mes** (laborables y fines de s
 
 - **Entradas BC** = ajustes positivos ILE (`[Entry Type] = 2`, almacenes E/G): `SUM(ABS([Quantity]))` por `[Item No.]` / Cod. producto.
 - **Ventas BC** = ventas ILE (`[Entry Type] = 1`, almacenes E/G): `SUM(ABS([Quantity]))` por `[Item No.]` / Cod. producto.
-- **Stock teorico** = Stock inicial + Entradas − Ventas.
-- Stock inicial dia 1 = lotes ILE en stock al inicio (empaque anterior; salida ese dia o despues); 1 lote = 1 caja.
+- **Ajustes negativos** = ILE (`[Entry Type] = 3`, almacenes E/G): `SUM(ABS([Quantity]))` por `[Item No.]` / Cod. producto.
+- **Stock teorico** = Stock inicial + Entradas − Ventas − Ajustes negativos.
+- Stock inicial dia 1 = lotes ILE en stock al inicio (empaque anterior; salida Type 1/3 ese dia o despues); 1 lote = 1 caja.
 - Stock final real = lotes ILE en stock al cierre (incluye arrastre de dias anteriores); 1 lote = 1 caja.
 - **Encadenamiento:** stock final teorico dia N = stock inicial dia N+1.
-- Formula: Stock teorico = Stock inicial + Salidas − Ventas; Check = teorico − real.
+- Check = teorico − real.
 
 ### Pestañas Stock inicial / Stock final BC E/G (por tipo)
 
@@ -624,10 +624,21 @@ Ejemplo abril 2026: stock inicial al **01/04/2026**; stock final = empaque en ab
 
 Sin cambio de codigo en este repositorio: IT debe crear usuarios SQL (o grupo AD) individuales con solo lectura; cada puesto ya puede guardar su `DB_USER`/`DB_PASSWORD` con `configurar_credenciales.bat`. Ver README.
 
-En la pestaña **Balance BC E/G** hay dos tablas adicionales:
+En la pestaña **Balance BC E/G** el desglose es por **tipo de producto** (sin tabla de detalle por lote, para mantener el informe ligero). El pie de página documenta el tratamiento de ajustes negativos (Type 3).
 
-1. **Por tipo de producto** — resumen agrupado con expansion de lotes.
-2. **Detalle por lote** — listado completo exportable a Excel.
+### Pestaña Ajustes negativos (análisis)
+
+KPI / análisis de ILE `[Entry Type] = 3` en almacenes **E/G**:
+
+| Dimension | Campo |
+|-----------|--------|
+| **Usuario** | ILE `[Id. usuario]` |
+| **Dia** | `[Posting Date]` |
+| **Producto** | `[Item No.]` (+ Description si existe) |
+| **Cajas** | `SUM(ABS([Quantity]))` |
+| **Kg** | `SUM(ABS([Kilos]))` |
+
+Incluye KPIs, gráficas (por usuario, evolución diaria apilada, top productos) y tablas exportables a Excel.
 
 ### Implementacion
 

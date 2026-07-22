@@ -663,13 +663,21 @@ def print_console_summary(start: dt.date, end: dt.date, output_path: Path, repor
           f"Check: {fmt_num(k['bc_bal_kg_check'])} kg"
       )
     if k.get("bc_bal_cajas_stock_inicial") is not None:
+      adj_neg = int(k.get("bc_bal_cajas_ajustes_neg") or 0)
       print(
           f"Balance por tipo (cajas) — Stock inicial: {int(k['bc_bal_cajas_stock_inicial']):,} | "
           f"Entradas BC (+): {int(k['bc_bal_cajas_entradas']):,} | "
           f"Ventas: {int(k['bc_bal_cajas_ventas']):,} | "
+          f"Ajustes neg.: {adj_neg:,} | "
           f"Teorico: {int(k['bc_bal_cajas_stock_teorico']):,} | "
           f"Real: {int(k['bc_bal_cajas_stock_real']):,} | "
           f"Check: {int(k['bc_bal_cajas_check']):,} cajas"
+      )
+    if k.get("bc_adj_neg_cajas") is not None:
+      print(
+          f"Analisis ajustes neg. — Cajas: {int(k.get('bc_adj_neg_cajas') or 0):,} | "
+          f"Usuarios: {int(k.get('bc_adj_neg_usuarios') or 0):,} | "
+          f"Top usuario: {k.get('bc_adj_neg_top_usuario') or '—'}"
       )
     if k.get("kg_stock_inicial") is not None:
       origen = " (arrastre mensual)" if k.get("kg_stock_inicial_auto") else ""
@@ -827,11 +835,11 @@ PREMISA_BC_BALANCE_EG_REGLAS = (
   "Historico ILE acotado desde 2026-01-01 para evitar timeout en BC.",
   "Fines de semana: sin Salidas Innova ni Ventas BC (0 kg); stocks se arrastran del dia anterior.",
   "Desglose por tipo de producto BC (Cod. producto via Conversion productos: Cod. bascula = material Innova) y lote.",
-  "Balance por tipo en cajas: Entradas = ajustes positivos BC (Entry Type 2); Ventas = ventas BC (Entry Type 1); agregadas por Cod. producto.",
+  "Balance por tipo en cajas: Entradas = ajustes positivos BC (Entry Type 2); Ventas = ventas BC (Entry Type 1); Ajustes negativos = Entry Type 3; agregadas por Cod. producto.",
   "Encadenamiento en cajas: stock final teorico del dia N = stock inicial del dia N+1.",
   "Stock inicial BC E/G por producto: corte a fecha inicio; empaque anterior; venta ese dia o despues; cajas y kg.",
-  "Stock final BC E/G por producto: empaque del periodo sin venta hasta fecha fin (pendiente mes siguiente); cajas y kg.",
-  "Ajustes negativos (Entry Type 3): marcan salida del lote en stock inicial/real (junto con venta Type 1); no restan como flujo aparte en la formula teorica (kg: Innova−Ventas; cajas: Entradas Type 2 − Ventas Type 1).",
+  "Stock final BC E/G por producto: empaque del periodo sin venta/ajuste neg. hasta fecha fin (pendiente mes siguiente); cajas y kg.",
+  "Ajustes negativos (Entry Type 3): marcan salida del lote en stock inicial/real (junto con venta Type 1). En balance kg no restan como flujo aparte (Innova−Ventas Type 1). En balance cajas restan: Inicial + Entradas (Type 2) − Ventas (Type 1) − Ajustes neg. (Type 3).",
 )
 
 # Limitacion conocida — debe mostrarse en todos los resultados (ver PREMISAS.md).
@@ -843,13 +851,14 @@ NOTA_ALERTA_VAP = (
 NOTA_ALERTA_VAP_TITULO = "Alerta — limitacion VAP en stock de tinas"
 
 NOTA_BC_AJUSTES_NEGATIVOS = (
-  "Ajustes negativos BC (Entry Type = 3): se usan como salida del lote para stock inicial/real "
+  "Ajustes negativos BC (Entry Type = 3): marcan salida del lote para stock inicial/real "
   "(igual que la venta Type 1: el lote deja de estar en almacén). "
-  "No tienen columna propia en el balance teórico: no restan kg/cajas aparte. "
-  "Fórmulas: kg = Inicial + Salidas Innova − Ventas (Type 1); "
-  "cajas = Inicial + Entradas (Type 2) − Ventas (Type 1)."
+  "En el balance de kg no restan como flujo aparte "
+  "(fórmula: Inicial + Salidas Innova − Ventas Type 1). "
+  "En el balance de cajas sí tienen columna propia y restan: "
+  "Inicial + Entradas (Type 2) − Ventas (Type 1) − Ajustes neg. (Type 3), con ABS(Quantity)."
 )
-NOTA_BC_AJUSTES_NEGATIVOS_TITULO = "Pie — ajustes negativos en balance BC E/G"
+NOTA_BC_AJUSTES_NEGATIVOS_TITULO = "Ajustes negativos BC (Entry Type 3)"
 
 
 def build_nota_alerta_vap_html() -> str:
@@ -867,6 +876,16 @@ def build_nota_bc_ajustes_negativos_html() -> str:
         f"<p class='nota-bc-ajustes-titulo'>{html.escape(NOTA_BC_AJUSTES_NEGATIVOS_TITULO)}</p>"
         f"<p class='nota-bc-ajustes-texto'>{html.escape(NOTA_BC_AJUSTES_NEGATIVOS)}</p>"
         "</footer>"
+    )
+
+
+def build_report_footnotes_html() -> str:
+    """Notas globales del informe (una sola vez al pie)."""
+    return (
+        "<section class='report-footnotes' aria-label='Notas del informe'>"
+        f"{build_nota_alerta_vap_html()}"
+        f"{build_nota_bc_ajustes_negativos_html()}"
+        "</section>"
     )
 
 
@@ -913,6 +932,7 @@ def build_report_intro_html(
         "<li><strong>Balance</strong> — stock de tinas, merma y arrastre mensual.</li>"
         "<li><strong>Cruce BC</strong> — enlace Innova / Business Central por lote.</li>"
         "<li><strong>Balance BC E/G</strong> — stock inicial, salidas Innova, ventas y check teorico (almacenes E y G).</li>"
+        "<li><strong>Análisis ILE</strong> — validación Type 1/2/3, checks kg/cajas e indicadores.</li>"
         "<li><strong>Materiales</strong> — top entradas y salidas.</li>"
         "</ol>"
         "<p class='intro-debug-note muted'>"
@@ -1534,6 +1554,121 @@ def fetch_bc_balance_eg(
         params_period,
     )
 
+    q_ajustes_neg_adj_diario = f"""
+    SELECT
+      CAST(ile.[Posting Date] AS date) AS fecha,
+      LTRIM(RTRIM(CAST(ile.[Item No.] AS varchar(50)))) AS item_no,
+      SUM(ABS(CAST(ile.[Quantity] AS float))) AS qty,
+      SUM(ABS(CAST(ile.[Kilos] AS float))) AS kg,
+      COUNT(DISTINCT ile.[Lot No.]) AS lotes
+    FROM bc.[Item Ledger Entry] ile
+    WHERE ile.[Posting Date] >= %s
+      AND ile.[Posting Date] < DATEADD(day, 1, %s)
+      AND {sql_bc_ile_posting_from()}
+      AND {SQL_BC_ILE_NEG_ADJ}
+      AND {SQL_BC_LOCATION_EG}
+      AND NULLIF(LTRIM(RTRIM(CAST(ile.[Item No.] AS varchar(50)))), '') IS NOT NULL
+    GROUP BY CAST(ile.[Posting Date] AS date), LTRIM(RTRIM(CAST(ile.[Item No.] AS varchar(50))))
+    ORDER BY fecha, item_no;
+    """
+    ajustes_neg_adj_diario = run_step(
+        "ajustes negativos diario por producto",
+        q_ajustes_neg_adj_diario,
+        params_period,
+    )
+
+    q_ajustes_neg_analisis = f"""
+    SELECT
+      CAST(ile.[Entry Type] AS int) AS entry_type,
+      CAST(ile.[Posting Date] AS date) AS fecha,
+      COALESCE(
+        NULLIF(LTRIM(RTRIM(CAST(ile.[Id. usuario] AS varchar(100)))), ''),
+        '(sin usuario)'
+      ) AS usuario,
+      LTRIM(RTRIM(CAST(ile.[Item No.] AS varchar(50)))) AS item_no,
+      MAX(NULLIF(LTRIM(RTRIM(CAST(ile.[Description] AS varchar(250)))), '')) AS item_description,
+      SUM(ABS(CAST(ile.[Quantity] AS float))) AS qty,
+      SUM(ABS(CAST(ile.[Kilos] AS float))) AS kg,
+      COUNT(*) AS movimientos,
+      COUNT(DISTINCT ile.[Lot No.]) AS lotes,
+      SUM(CASE WHEN ABS(CAST(ile.[Quantity] AS float)) <> 1 THEN 1 ELSE 0 END) AS mov_qty_ne_1,
+      SUM(CASE WHEN ABS(CAST(ile.[Kilos] AS float)) = 0 THEN 1 ELSE 0 END) AS mov_kg_0
+    FROM bc.[Item Ledger Entry] ile
+    WHERE ile.[Posting Date] >= %s
+      AND ile.[Posting Date] < DATEADD(day, 1, %s)
+      AND {sql_bc_ile_posting_from()}
+      AND ile.[Entry Type] IN (1, 2, 3)
+      AND {SQL_BC_LOCATION_EG}
+      AND NULLIF(LTRIM(RTRIM(CAST(ile.[Item No.] AS varchar(50)))), '') IS NOT NULL
+    GROUP BY
+      CAST(ile.[Entry Type] AS int),
+      CAST(ile.[Posting Date] AS date),
+      COALESCE(
+        NULLIF(LTRIM(RTRIM(CAST(ile.[Id. usuario] AS varchar(100)))), ''),
+        '(sin usuario)'
+      ),
+      LTRIM(RTRIM(CAST(ile.[Item No.] AS varchar(50))))
+    ORDER BY entry_type, fecha, usuario, item_no;
+    """
+    ajustes_neg_analisis_raw = run_step(
+        "movimientos ILE analisis Type 1/2/3 usuario/dia/producto",
+        q_ajustes_neg_analisis,
+        params_period,
+    )
+
+    q_movimientos_integridad = f"""
+    WITH venta AS (
+      SELECT DISTINCT CAST(ile.[Lot No.] AS varchar(50)) AS lot
+      FROM bc.[Item Ledger Entry] ile
+      WHERE ile.[Posting Date] >= %s
+        AND ile.[Posting Date] < DATEADD(day, 1, %s)
+        AND {sql_bc_ile_posting_from()}
+        AND {SQL_BC_ILE_SALE}
+        AND {SQL_BC_LOCATION_EG}
+        AND NULLIF(LTRIM(RTRIM(ile.[Lot No.])), '') IS NOT NULL
+    ),
+    neg_adj AS (
+      SELECT DISTINCT CAST(ile.[Lot No.] AS varchar(50)) AS lot
+      FROM bc.[Item Ledger Entry] ile
+      WHERE ile.[Posting Date] >= %s
+        AND ile.[Posting Date] < DATEADD(day, 1, %s)
+        AND {sql_bc_ile_posting_from()}
+        AND {SQL_BC_ILE_NEG_ADJ}
+        AND {SQL_BC_LOCATION_EG}
+        AND NULLIF(LTRIM(RTRIM(ile.[Lot No.])), '') IS NOT NULL
+    ),
+    pos_adj AS (
+      SELECT DISTINCT CAST(ile.[Lot No.] AS varchar(50)) AS lot
+      FROM bc.[Item Ledger Entry] ile
+      WHERE ile.[Posting Date] >= %s
+        AND ile.[Posting Date] < DATEADD(day, 1, %s)
+        AND {sql_bc_ile_posting_from()}
+        AND {SQL_BC_ILE_POS_ADJ}
+        AND {SQL_BC_LOCATION_EG}
+        AND NULLIF(LTRIM(RTRIM(ile.[Lot No.])), '') IS NOT NULL
+    )
+    SELECT
+      (SELECT COUNT(*) FROM venta) AS lotes_venta,
+      (SELECT COUNT(*) FROM neg_adj) AS lotes_neg,
+      (SELECT COUNT(*) FROM pos_adj) AS lotes_pos,
+      (SELECT COUNT(*) FROM venta INNER JOIN neg_adj ON venta.lot = neg_adj.lot) AS lotes_venta_y_neg,
+      (SELECT COUNT(*) FROM pos_adj INNER JOIN neg_adj ON pos_adj.lot = neg_adj.lot) AS lotes_pos_y_neg,
+      (SELECT COUNT(*) FROM pos_adj INNER JOIN venta ON pos_adj.lot = venta.lot) AS lotes_pos_y_venta;
+    """
+    integridad_params = (
+        start.isoformat(),
+        end.isoformat(),
+        start.isoformat(),
+        end.isoformat(),
+        start.isoformat(),
+        end.isoformat(),
+    )
+    movimientos_integridad = run_step(
+        "integridad lotes Type 1/2/3 solapes",
+        q_movimientos_integridad,
+        integridad_params,
+    )[0]
+
     q_ventas_total = f"""
     SELECT
       SUM(ABS(CAST(ile.[Kilos] AS float))) AS kg,
@@ -1548,13 +1683,13 @@ def fetch_bc_balance_eg(
     ventas_total = run_step("ventas total", q_ventas_total, params_period)[0]
 
     q_unsold_lots = f"""
-    WITH mar_venta AS (
+    WITH mar_salida AS (
       SELECT DISTINCT CAST(ile.[Lot No.] AS varchar(50)) AS lot
       FROM bc.[Item Ledger Entry] ile
       WHERE ile.[Posting Date] >= %s
         AND ile.[Posting Date] < DATEADD(day, 1, %s)
         AND {sql_bc_ile_posting_from()}
-        AND {SQL_BC_ILE_SALE}
+        AND {SQL_BC_ILE_SALE_OR_NEG_ADJ}
         AND {SQL_BC_LOCATION_EG}
         AND NULLIF(LTRIM(RTRIM(ile.[Lot No.])), '') IS NOT NULL
     )
@@ -1565,20 +1700,20 @@ def fetch_bc_balance_eg(
       AND {sql_bc_ile_empaque_from()}
       AND {SQL_BC_LOCATION_EG}
       AND NULLIF(LTRIM(RTRIM(ile.[Lot No.])), '') IS NOT NULL
-      AND CAST(ile.[Lot No.] AS varchar(50)) NOT IN (SELECT lot FROM mar_venta)
+      AND CAST(ile.[Lot No.] AS varchar(50)) NOT IN (SELECT lot FROM mar_salida)
     ORDER BY lot;
     """
     unsold_rows = run_step("lotes sin venta", q_unsold_lots, params_unsold)
     unsold_lots = [str(row["lot"]).strip() for row in unsold_rows]
 
     q_stock_final_total = f"""
-    WITH mar_venta AS (
+    WITH mar_salida AS (
       SELECT DISTINCT CAST(ile.[Lot No.] AS varchar(50)) AS lot
       FROM bc.[Item Ledger Entry] ile
       WHERE ile.[Posting Date] >= %s
         AND ile.[Posting Date] < DATEADD(day, 1, %s)
         AND {sql_bc_ile_posting_from()}
-        AND {SQL_BC_ILE_SALE}
+        AND {SQL_BC_ILE_SALE_OR_NEG_ADJ}
         AND {SQL_BC_LOCATION_EG}
         AND NULLIF(LTRIM(RTRIM(ile.[Lot No.])), '') IS NOT NULL
     ),
@@ -1592,7 +1727,7 @@ def fetch_bc_balance_eg(
         AND {sql_bc_ile_empaque_from()}
         AND {SQL_BC_LOCATION_EG}
         AND NULLIF(LTRIM(RTRIM(ile.[Lot No.])), '') IS NOT NULL
-        AND CAST(ile.[Lot No.] AS varchar(50)) NOT IN (SELECT lot FROM mar_venta)
+        AND CAST(ile.[Lot No.] AS varchar(50)) NOT IN (SELECT lot FROM mar_salida)
       GROUP BY CAST(ile.[Lot No.] AS varchar(50))
     )
     SELECT
@@ -1618,7 +1753,7 @@ def fetch_bc_balance_eg(
         AND NULLIF(LTRIM(RTRIM(ile.[Lot No.])), '') IS NOT NULL
       GROUP BY CAST(ile.[Lot No.] AS varchar(50))
     ),
-    lot_first_sale AS (
+    lot_first_out AS (
       SELECT
         CAST(ile.[Lot No.] AS varchar(50)) AS lot,
         MIN(CAST(ile.[Posting Date] AS date)) AS first_sale
@@ -1626,7 +1761,7 @@ def fetch_bc_balance_eg(
       WHERE ile.[Posting Date] >= %s
         AND ile.[Posting Date] < DATEADD(day, 1, %s)
         AND {sql_bc_ile_posting_from()}
-        AND {SQL_BC_ILE_SALE}
+        AND {SQL_BC_ILE_SALE_OR_NEG_ADJ}
         AND {SQL_BC_LOCATION_EG}
         AND NULLIF(LTRIM(RTRIM(ile.[Lot No.])), '') IS NOT NULL
       GROUP BY CAST(ile.[Lot No.] AS varchar(50))
@@ -1639,7 +1774,7 @@ def fetch_bc_balance_eg(
       e.item_description,
       s.first_sale
     FROM lot_empaque e
-    LEFT JOIN lot_first_sale s ON s.lot = e.lot
+    LEFT JOIN lot_first_out s ON s.lot = e.lot
     ORDER BY e.lot;
     """
     lot_snapshot_raw = run_step("snapshot lotes", q_lot_snapshot, params_lot_snapshot)
@@ -1786,6 +1921,9 @@ def fetch_bc_balance_eg(
         {"name": "bc_balance_entradas_pos_adj_por_lote_eg", "query": q_entradas_pos_adj_por_lote.strip()},
         {"name": "bc_balance_entradas_pos_adj_diario_producto_eg", "query": q_entradas_pos_adj_diario.strip()},
         {"name": "bc_balance_ventas_diario_producto_eg", "query": q_ventas_diario_producto.strip()},
+        {"name": "bc_balance_ajustes_neg_adj_diario_producto_eg", "query": q_ajustes_neg_adj_diario.strip()},
+        {"name": "bc_balance_ajustes_neg_analisis_eg", "query": q_ajustes_neg_analisis.strip()},
+        {"name": "bc_balance_movimientos_integridad_eg", "query": q_movimientos_integridad.strip()},
         {"name": "bc_balance_lot_snapshot_eg", "query": q_lot_snapshot.strip()},
         {"name": "bc_balance_unsold_lots_eg", "query": q_unsold_lots.strip()},
         {"name": "bc_balance_stock_final_eg", "query": q_stock_final_total.strip()},
@@ -1812,6 +1950,9 @@ def fetch_bc_balance_eg(
         "entradas_pos_adj_por_lote": entradas_pos_adj_por_lote,
         "entradas_pos_adj_diario": entradas_pos_adj_diario,
         "ventas_diario_producto": ventas_diario_producto,
+        "ajustes_neg_adj_diario": ajustes_neg_adj_diario,
+        "ajustes_neg_analisis_raw": ajustes_neg_analisis_raw,
+        "movimientos_integridad": movimientos_integridad,
         "kg_stock_inicial": kg_stock_inicial_apertura,
         "lotes_stock_inicial": lotes_stock_inicial_apertura,
         "kg_ventas_stock_antiguo_mes": to_float(ventas_stock_antiguo_total.get("kg")),
@@ -1950,12 +2091,6 @@ def _format_sql_date(value: Any) -> str:
     if isinstance(value, dt.date):
         return value.strftime("%d/%m/%Y")
     return str(value)
-
-
-def _tipo_slug(tipo_key: str) -> str:
-    slug = "".join(ch if ch.isalnum() else "-" for ch in tipo_key.strip().lower())
-    slug = "-".join(part for part in slug.split("-") if part)
-    return slug or "sin-tipo"
 
 
 def _lot_in_stock_inicial(fe_empaque: Any, first_out: Any, day: dt.date) -> bool:
@@ -2178,7 +2313,6 @@ def build_bc_balance_por_tipo(lot_detalle: list[dict[str, Any]]) -> list[dict[st
                 "kg_ventas_bc": 0.0,
                 "kg_stock_final": 0.0,
                 "packs_innova": 0,
-                "lotes_detalle": [],
             },
         )
         bucket["lotes"] += 1
@@ -2195,7 +2329,6 @@ def build_bc_balance_por_tipo(lot_detalle: list[dict[str, Any]]) -> list[dict[st
             bucket["lotes_stock_final"] += 1
         if row.get("estado") == "vendido":
             bucket["lotes_vendidos"] += 1
-        bucket["lotes_detalle"].append(row)
 
     result = list(grouped.values())
     result.sort(key=lambda item: (-item["kg_innova"], item["tipo_nombre"]))
@@ -2213,6 +2346,8 @@ def build_bc_balance_por_tipo_cajas(
 
     Entradas = ajustes positivos BC (Entry Type 2) por [Item No.] / Cod. producto.
     Ventas = ventas BC (Entry Type 1) por [Item No.] / Cod. producto.
+    Ajustes negativos = Entry Type 3 por [Item No.] / Cod. producto.
+    Stock teorico = Inicial + Entradas − Ventas − Ajustes neg.
     Stock final dia N = stock inicial dia N+1 (igual que balance consolidado).
     """
     tipo_meta: dict[str, dict[str, str]] = {}
@@ -2297,6 +2432,19 @@ def build_bc_balance_por_tipo_cajas(
         ventas_dia_tipo.setdefault(day, {})
         ventas_dia_tipo[day][key] = ventas_dia_tipo[day].get(key, 0) + qty
 
+    ajustes_neg_dia_tipo: dict[dt.date, dict[str, int]] = {}
+    for row in (bc_balance or {}).get("ajustes_neg_adj_diario") or []:
+        day = sql_row_to_date(row.get("fecha"))
+        item_no = str(row.get("item_no") or "").strip()
+        if day is None or not item_no:
+            continue
+        key = _tipo_from_item(item_no)
+        qty = int(round(to_float(row.get("qty"))))
+        if qty <= 0:
+            continue
+        ajustes_neg_dia_tipo.setdefault(day, {})
+        ajustes_neg_dia_tipo[day][key] = ajustes_neg_dia_tipo[day].get(key, 0) + qty
+
     stock_ini_tipo: dict[str, int] = {}
     for key, rows in lots_by_tipo.items():
         stock_ini_tipo[key] = sum(
@@ -2332,14 +2480,17 @@ def build_bc_balance_por_tipo_cajas(
     detalle_diario_cajas: list[dict[str, Any]] = []
     acc_entradas: dict[str, int] = {key: 0 for key in tipo_meta}
     acc_ventas: dict[str, int] = {key: 0 for key in tipo_meta}
+    acc_ajustes_neg: dict[str, int] = {key: 0 for key in tipo_meta}
     stock_ini_carry: dict[str, int] = dict(stock_ini_tipo)
 
     for day in days:
         entradas_map = entradas_dia_tipo.get(day, {})
         ventas_map = ventas_dia_tipo.get(day, {})
+        ajustes_map = ajustes_neg_dia_tipo.get(day, {})
         real_map = stock_real_dia_tipo.get(day, {})
         cajas_entradas_dia = 0
         cajas_ventas_dia = 0
+        cajas_ajustes_neg_dia = 0
         cajas_ini_dia = 0
         cajas_teo_dia = 0
         cajas_real_dia = 0
@@ -2348,15 +2499,18 @@ def build_bc_balance_por_tipo_cajas(
             ini = int(stock_ini_carry.get(key, 0))
             ent = int(entradas_map.get(key, 0))
             ven = int(ventas_map.get(key, 0))
-            teorico = ini + ent - ven
+            adj = int(ajustes_map.get(key, 0))
+            teorico = ini + ent - ven - adj
             real = int(real_map.get(key, 0))
             acc_entradas[key] = acc_entradas.get(key, 0) + ent
             acc_ventas[key] = acc_ventas.get(key, 0) + ven
+            acc_ajustes_neg[key] = acc_ajustes_neg.get(key, 0) + adj
             # Encadenamiento: stock final teorico del dia = stock inicial del siguiente.
             stock_ini_carry[key] = teorico
             cajas_ini_dia += ini
             cajas_entradas_dia += ent
             cajas_ventas_dia += ven
+            cajas_ajustes_neg_dia += adj
             cajas_teo_dia += teorico
             cajas_real_dia += real
 
@@ -2366,6 +2520,7 @@ def build_bc_balance_por_tipo_cajas(
                 "cajas_stock_inicial": cajas_ini_dia,
                 "cajas_entradas": cajas_entradas_dia,
                 "cajas_ventas": cajas_ventas_dia,
+                "cajas_ajustes_neg": cajas_ajustes_neg_dia,
                 "cajas_stock_teorico": cajas_teo_dia,
                 "cajas_stock_real": cajas_real_dia,
                 "cajas_check": cajas_teo_dia - cajas_real_dia,
@@ -2377,7 +2532,8 @@ def build_bc_balance_por_tipo_cajas(
         ini = int(stock_ini_tipo.get(key, 0))
         ent = int(acc_entradas.get(key, 0))
         ven = int(acc_ventas.get(key, 0))
-        teorico = ini + ent - ven
+        adj = int(acc_ajustes_neg.get(key, 0))
+        teorico = ini + ent - ven - adj
         real = int(stock_real_dia_tipo.get(end, {}).get(key, 0))
         result.append(
             {
@@ -2385,6 +2541,7 @@ def build_bc_balance_por_tipo_cajas(
                 "cajas_stock_inicial": ini,
                 "cajas_entradas": ent,
                 "cajas_ventas": ven,
+                "cajas_ajustes_neg": adj,
                 "cajas_stock_teorico": teorico,
                 "cajas_stock_real": real,
                 "cajas_check": teorico - real,
@@ -2394,11 +2551,433 @@ def build_bc_balance_por_tipo_cajas(
 
     result.sort(
         key=lambda item: (
-            -(int(item["cajas_entradas"]) + int(item["cajas_ventas"])),
+            -(
+                int(item["cajas_entradas"])
+                + int(item["cajas_ventas"])
+                + int(item["cajas_ajustes_neg"])
+            ),
             str(item["tipo_key"]),
         )
     )
     return result, detalle_diario_cajas
+
+
+AJUSTES_NEG_CHART_COLORS = (
+    "#003b5c",
+    "#00a3c8",
+    "#c8102e",
+    "#005f87",
+    "#7a9eb1",
+    "#e87722",
+    "#2d6a4f",
+    "#6c5ce7",
+    "#b08968",
+    "#495057",
+)
+
+BC_ENTRY_TYPE_LABELS = {
+    1: "Venta (Type 1)",
+    2: "Ajuste + (Type 2)",
+    3: "Ajuste − (Type 3)",
+}
+
+
+def build_bc_ajustes_neg_analisis(
+    raw_rows: list[dict[str, Any]] | None,
+    integridad_row: dict[str, Any] | None = None,
+    *,
+    cajas_check: int | None = None,
+    kg_check: float | None = None,
+    cajas_stock_teorico: int | None = None,
+    cajas_stock_real: int | None = None,
+    kg_stock_teorico: float | None = None,
+    kg_stock_real: float | None = None,
+) -> dict[str, Any]:
+    """KPI / analisis de movimientos ILE Type 1/2/3 + validacion de ecuacion."""
+    detalle_all: list[dict[str, Any]] = []
+    for row in raw_rows or []:
+        day = sql_row_to_date(row.get("fecha"))
+        if day is None:
+            continue
+        entry_type = int(row.get("entry_type") or 0)
+        if entry_type not in (1, 2, 3):
+            continue
+        item_no = str(row.get("item_no") or "").strip() or "(sin producto)"
+        usuario = str(row.get("usuario") or "").strip() or "(sin usuario)"
+        desc = str(row.get("item_description") or "").strip()
+        qty = int(round(to_float(row.get("qty"))))
+        kg = to_float(row.get("kg"))
+        movimientos = int(row.get("movimientos") or 0)
+        lotes = int(row.get("lotes") or 0)
+        mov_qty_ne_1 = int(row.get("mov_qty_ne_1") or 0)
+        mov_kg_0 = int(row.get("mov_kg_0") or 0)
+        if qty <= 0 and kg <= 0:
+            continue
+        detalle_all.append(
+            {
+                "entry_type": entry_type,
+                "tipo_label": BC_ENTRY_TYPE_LABELS.get(entry_type, f"Type {entry_type}"),
+                "fecha": day.strftime("%d/%m/%Y"),
+                "fecha_iso": day.isoformat(),
+                "usuario": usuario,
+                "item_no": item_no,
+                "item_description": desc or item_no,
+                "cajas": qty,
+                "kg": kg,
+                "movimientos": movimientos,
+                "lotes": lotes,
+                "mov_qty_ne_1": mov_qty_ne_1,
+                "mov_kg_0": mov_kg_0,
+            }
+        )
+
+    # Resumen por tipo de movimiento
+    por_tipo: dict[int, dict[str, Any]] = {}
+    for etype in (1, 2, 3):
+        por_tipo[etype] = {
+            "entry_type": etype,
+            "tipo_label": BC_ENTRY_TYPE_LABELS[etype],
+            "cajas": 0,
+            "kg": 0.0,
+            "movimientos": 0,
+            "lotes": 0,
+            "mov_qty_ne_1": 0,
+            "mov_kg_0": 0,
+            "usuarios": set(),
+            "productos": set(),
+        }
+    for row in detalle_all:
+        etype = int(row["entry_type"])
+        bucket = por_tipo[etype]
+        bucket["cajas"] += int(row["cajas"])
+        bucket["kg"] += to_float(row["kg"])
+        bucket["movimientos"] += int(row["movimientos"])
+        bucket["lotes"] += int(row["lotes"])
+        bucket["mov_qty_ne_1"] += int(row["mov_qty_ne_1"])
+        bucket["mov_kg_0"] += int(row["mov_kg_0"])
+        bucket["usuarios"].add(row["usuario"])
+        bucket["productos"].add(row["item_no"])
+
+    por_tipo_list = []
+    for etype in (1, 2, 3):
+        meta = por_tipo[etype]
+        cajas = int(meta["cajas"])
+        lotes = int(meta["lotes"])
+        por_tipo_list.append(
+            {
+                **meta,
+                "usuarios": len(meta["usuarios"]),
+                "productos": len(meta["productos"]),
+                "delta_qty_lotes": cajas - lotes,
+                "ok_qty_vs_lote": abs(cajas - lotes) <= max(5, int(0.001 * max(cajas, 1))),
+                "pct_kg_0": (100.0 * int(meta["mov_kg_0"]) / int(meta["movimientos"]))
+                if int(meta["movimientos"])
+                else 0.0,
+            }
+        )
+
+    # Analisis detallado Type 3 (usuario / dia / producto) — UI KPI existente
+    detalle = [r for r in detalle_all if int(r["entry_type"]) == 3]
+    por_usuario: dict[str, dict[str, Any]] = {}
+    por_dia: dict[str, dict[str, Any]] = {}
+    por_producto: dict[str, dict[str, Any]] = {}
+    dia_usuario: dict[str, dict[str, int]] = {}
+
+    for row in detalle:
+        usuario = row["usuario"]
+        fecha = row["fecha"]
+        item = row["item_no"]
+        cajas = int(row["cajas"])
+        kg = to_float(row["kg"])
+        movs = int(row["movimientos"])
+        lotes = int(row["lotes"])
+
+        u = por_usuario.setdefault(
+            usuario,
+            {
+                "usuario": usuario,
+                "cajas": 0,
+                "kg": 0.0,
+                "movimientos": 0,
+                "lotes": 0,
+                "dias": set(),
+                "productos": set(),
+            },
+        )
+        u["cajas"] += cajas
+        u["kg"] += kg
+        u["movimientos"] += movs
+        u["lotes"] += lotes
+        u["dias"].add(fecha)
+        u["productos"].add(item)
+
+        d = por_dia.setdefault(
+            fecha,
+            {
+                "fecha": fecha,
+                "fecha_iso": row["fecha_iso"],
+                "cajas": 0,
+                "kg": 0.0,
+                "movimientos": 0,
+                "lotes": 0,
+                "usuarios": set(),
+            },
+        )
+        d["cajas"] += cajas
+        d["kg"] += kg
+        d["movimientos"] += movs
+        d["lotes"] += lotes
+        d["usuarios"].add(usuario)
+
+        p = por_producto.setdefault(
+            item,
+            {
+                "item_no": item,
+                "item_description": row["item_description"],
+                "cajas": 0,
+                "kg": 0.0,
+                "movimientos": 0,
+                "lotes": 0,
+                "usuarios": set(),
+            },
+        )
+        p["cajas"] += cajas
+        p["kg"] += kg
+        p["movimientos"] += movs
+        p["lotes"] += lotes
+        p["usuarios"].add(usuario)
+        if not p.get("item_description") and row["item_description"]:
+            p["item_description"] = row["item_description"]
+
+        dia_usuario.setdefault(fecha, {})
+        dia_usuario[fecha][usuario] = dia_usuario[fecha].get(usuario, 0) + cajas
+
+    usuarios_sorted = sorted(
+        (
+            {
+                **meta,
+                "dias": len(meta["dias"]),
+                "productos": len(meta["productos"]),
+            }
+            for meta in por_usuario.values()
+        ),
+        key=lambda item: (-int(item["cajas"]), str(item["usuario"])),
+    )
+    dias_sorted = sorted(
+        (
+            {
+                **meta,
+                "usuarios": len(meta["usuarios"]),
+            }
+            for meta in por_dia.values()
+        ),
+        key=lambda item: item["fecha_iso"],
+    )
+    productos_sorted = sorted(
+        (
+            {
+                **meta,
+                "usuarios": len(meta["usuarios"]),
+            }
+            for meta in por_producto.values()
+        ),
+        key=lambda item: (-int(item["cajas"]), str(item["item_no"])),
+    )
+    detalle.sort(
+        key=lambda item: (
+            item["fecha_iso"],
+            -int(item["cajas"]),
+            str(item["usuario"]),
+            str(item["item_no"]),
+        )
+    )
+
+    total_cajas = sum(int(u["cajas"]) for u in usuarios_sorted)
+    total_kg = sum(to_float(u["kg"]) for u in usuarios_sorted)
+    total_movs = sum(int(u["movimientos"]) for u in usuarios_sorted)
+    total_lotes = sum(int(u["lotes"]) for u in usuarios_sorted)
+    top_user = usuarios_sorted[0]["usuario"] if usuarios_sorted else "—"
+    top_product = productos_sorted[0]["item_no"] if productos_sorted else "—"
+
+    user_labels = [str(u["usuario"]) for u in usuarios_sorted]
+    user_colors = [
+        AJUSTES_NEG_CHART_COLORS[i % len(AJUSTES_NEG_CHART_COLORS)]
+        for i in range(len(user_labels))
+    ]
+    day_labels = [d["fecha"] for d in dias_sorted]
+    stacked_datasets = []
+    for idx, usuario in enumerate(user_labels):
+        stacked_datasets.append(
+            {
+                "label": usuario,
+                "data": [
+                    int(dia_usuario.get(day["fecha"], {}).get(usuario, 0))
+                    for day in dias_sorted
+                ],
+                "backgroundColor": AJUSTES_NEG_CHART_COLORS[
+                    idx % len(AJUSTES_NEG_CHART_COLORS)
+                ],
+                "stack": "cajas",
+            }
+        )
+
+    top_productos = productos_sorted[:15]
+    integ = integridad_row or {}
+    lotes_venta_y_neg = int(integ.get("lotes_venta_y_neg") or 0)
+    type3 = next((t for t in por_tipo_list if t["entry_type"] == 3), {})
+    type2 = next((t for t in por_tipo_list if t["entry_type"] == 2), {})
+    type1 = next((t for t in por_tipo_list if t["entry_type"] == 1), {})
+
+    alertas: list[dict[str, Any]] = []
+    if lotes_venta_y_neg > 0:
+        alertas.append(
+            {
+                "nivel": "warn",
+                "codigo": "DOBLE_SALIDA",
+                "titulo": "Lotes con venta y ajuste negativo",
+                "detalle": (
+                    f"{lotes_venta_y_neg:,} lotes tienen Type 1 y Type 3 en el periodo. "
+                    "En cajas la fórmula resta ambas cantidades, pero el stock real solo "
+                    "saca el lote una vez → empuja el check de cajas a negativo."
+                ),
+                "valor": lotes_venta_y_neg,
+            }
+        )
+    delta_t3 = int(type3.get("delta_qty_lotes") or 0)
+    if delta_t3 > 50:
+        alertas.append(
+            {
+                "nivel": "warn",
+                "codigo": "QTY_NE_1_TYPE3",
+                "titulo": "Type 3 con Quantity ≠ 1 caja/lote",
+                "detalle": (
+                    f"ABS(Quantity)−lotes = {delta_t3:,}. Hay movimientos Type 3 con "
+                    "Quantity=2 (u otra). El stock cuenta 1 lote=1 caja; la fórmula resta "
+                    "ABS(Quantity) → descuadre sistemático en cajas."
+                ),
+                "valor": delta_t3,
+            }
+        )
+    pct_kg0 = to_float(type3.get("pct_kg_0"))
+    if pct_kg0 >= 50:
+        alertas.append(
+            {
+                "nivel": "info",
+                "codigo": "TYPE3_KG_CERO",
+                "titulo": "Type 3 casi sin kilos BC",
+                "detalle": (
+                    f"{pct_kg0:.0f}% de movimientos Type 3 tienen [Kilos]=0 "
+                    f"(solo {fmt_num(type3.get('kg', 0))} kg totales). "
+                    "Por eso el check de kg (~−70) no refleja el volumen de ajustes "
+                    "negativos en cajas (−228)."
+                ),
+                "valor": pct_kg0,
+            }
+        )
+    delta_t2 = int(type2.get("delta_qty_lotes") or 0)
+    if delta_t2 > 100:
+        alertas.append(
+            {
+                "nivel": "info",
+                "codigo": "QTY_VS_LOTES_TYPE2",
+                "titulo": "Type 2: más Quantity que lotes distintos",
+                "detalle": (
+                    f"ABS(Quantity)−lotes = {delta_t2:,} (reentradas / varios movimientos "
+                    "sobre el mismo lote). Entradas en cajas usan Quantity; stock usa lotes."
+                ),
+                "valor": delta_t2,
+            }
+        )
+
+    # Coherencia de ecuaciones documentadas
+    ecuacion_cajas_ok = cajas_check is not None and abs(int(cajas_check)) == 0
+    ecuacion_kg_ok = kg_check is not None and abs(to_float(kg_check)) <= BC_BALANCE_CHECK_TOLERANCE_KG
+    alertas.append(
+        {
+            "nivel": "ok" if ecuacion_kg_ok else "warn",
+            "codigo": "CHECK_KG",
+            "titulo": "Ecuación kg (Innova − Ventas Type 1)",
+            "detalle": (
+                f"Teórico {fmt_num(kg_stock_teorico)} − Real {fmt_num(kg_stock_real)} "
+                f"= check {fmt_num(kg_check)} kg. "
+                + (
+                    "Dentro de tolerancia."
+                    if ecuacion_kg_ok
+                    else "Fuera de tolerancia o descuadre a revisar."
+                )
+            ),
+            "valor": to_float(kg_check),
+        }
+    )
+    alertas.append(
+        {
+            "nivel": "ok" if ecuacion_cajas_ok else "warn",
+            "codigo": "CHECK_CAJAS",
+            "titulo": "Ecuación cajas (Ini + Type2 − Type1 − Type3)",
+            "detalle": (
+                f"Teórico {int(cajas_stock_teorico or 0):,} − Real {int(cajas_stock_real or 0):,} "
+                f"= check {int(cajas_check or 0):,} cajas. "
+                "No es comparable 1:1 con el check de kg (unidades y fórmulas distintas)."
+            ),
+            "valor": int(cajas_check or 0),
+        }
+    )
+
+    return {
+        "loaded": True,
+        "detalle": detalle,
+        "detalle_all": detalle_all,
+        "por_tipo": por_tipo_list,
+        "por_usuario": usuarios_sorted,
+        "por_dia": dias_sorted,
+        "por_producto": productos_sorted,
+        "alertas": alertas,
+        "integridad": {
+            "lotes_venta": int(integ.get("lotes_venta") or 0),
+            "lotes_neg": int(integ.get("lotes_neg") or 0),
+            "lotes_pos": int(integ.get("lotes_pos") or 0),
+            "lotes_venta_y_neg": lotes_venta_y_neg,
+            "lotes_pos_y_neg": int(integ.get("lotes_pos_y_neg") or 0),
+            "lotes_pos_y_venta": int(integ.get("lotes_pos_y_venta") or 0),
+        },
+        "checks": {
+            "cajas_check": int(cajas_check or 0),
+            "kg_check": to_float(kg_check),
+            "cajas_stock_teorico": int(cajas_stock_teorico or 0),
+            "cajas_stock_real": int(cajas_stock_real or 0),
+            "kg_stock_teorico": to_float(kg_stock_teorico),
+            "kg_stock_real": to_float(kg_stock_real),
+            "ecuacion_cajas_ok": ecuacion_cajas_ok,
+            "ecuacion_kg_ok": bool(ecuacion_kg_ok),
+        },
+        "totales": {
+            "cajas": total_cajas,
+            "kg": total_kg,
+            "movimientos": total_movs,
+            "lotes": total_lotes,
+            "usuarios": len(usuarios_sorted),
+            "dias": len(dias_sorted),
+            "productos": len(productos_sorted),
+            "top_usuario": top_user,
+            "top_producto": top_product,
+            "type1_cajas": int(type1.get("cajas") or 0),
+            "type2_cajas": int(type2.get("cajas") or 0),
+            "type3_cajas": int(type3.get("cajas") or 0),
+        },
+        "charts": {
+            "user_labels": user_labels,
+            "user_cajas": [int(u["cajas"]) for u in usuarios_sorted],
+            "user_colors": user_colors,
+            "day_labels": day_labels,
+            "day_cajas": [int(d["cajas"]) for d in dias_sorted],
+            "stacked_datasets": stacked_datasets,
+            "product_labels": [p["item_no"] for p in top_productos],
+            "product_cajas": [int(p["cajas"]) for p in top_productos],
+            "type_labels": [t["tipo_label"] for t in por_tipo_list],
+            "type_cajas": [int(t["cajas"]) for t in por_tipo_list],
+            "type_colors": ["#00a3c8", "#003b5c", "#c8102e"],
+        },
+    }
 
 
 def build_bc_stock_snapshot_por_producto(
@@ -2591,9 +3170,21 @@ def attach_bc_balance_eg_to_report(
     cajas_stock_inicial = sum(int(t["cajas_stock_inicial"]) for t in detalle_por_tipo_cajas)
     cajas_entradas = sum(int(t["cajas_entradas"]) for t in detalle_por_tipo_cajas)
     cajas_ventas = sum(int(t["cajas_ventas"]) for t in detalle_por_tipo_cajas)
+    cajas_ajustes_neg = sum(int(t.get("cajas_ajustes_neg") or 0) for t in detalle_por_tipo_cajas)
     cajas_stock_teorico = sum(int(t["cajas_stock_teorico"]) for t in detalle_por_tipo_cajas)
     cajas_stock_real = sum(int(t["cajas_stock_real"]) for t in detalle_por_tipo_cajas)
     cajas_check = cajas_stock_teorico - cajas_stock_real
+
+    ajustes_neg_analisis = build_bc_ajustes_neg_analisis(
+        bc_balance.get("ajustes_neg_analisis_raw"),
+        bc_balance.get("movimientos_integridad"),
+        cajas_check=cajas_check,
+        kg_check=kg_check,
+        cajas_stock_teorico=cajas_stock_teorico,
+        cajas_stock_real=cajas_stock_real,
+        kg_stock_teorico=kg_stock_teorico,
+        kg_stock_real=kg_stock_real,
+    )
 
     report_data["bc_balance_eg"] = {
         "loaded": True,
@@ -2614,7 +3205,8 @@ def attach_bc_balance_eg_to_report(
         "lotes_empaque_mes": bc_balance["lotes_empaque_mes"],
         "kg_empaque_mes": bc_balance.get("kg_empaque_mes", 0.0),
         "detalle_diario": detalle_bc,
-        "lot_detalle": lot_detalle,
+        # Sin detalle por lote en el informe (HTML pesado); se usa solo para agregados.
+        "lot_detalle": [],
         "detalle_por_tipo": detalle_por_tipo,
         "detalle_por_tipo_cajas": detalle_por_tipo_cajas,
         "detalle_diario_cajas": detalle_diario_cajas,
@@ -2625,9 +3217,11 @@ def attach_bc_balance_eg_to_report(
         "cajas_stock_inicial": cajas_stock_inicial,
         "cajas_entradas": cajas_entradas,
         "cajas_ventas": cajas_ventas,
+        "cajas_ajustes_neg": cajas_ajustes_neg,
         "cajas_stock_teorico": cajas_stock_teorico,
         "cajas_stock_real": cajas_stock_real,
         "cajas_check": cajas_check,
+        "ajustes_neg_analisis": ajustes_neg_analisis,
     }
 
     k = report_data["kpis"]
@@ -2643,9 +3237,15 @@ def attach_bc_balance_eg_to_report(
     k["bc_bal_cajas_stock_inicial"] = cajas_stock_inicial
     k["bc_bal_cajas_entradas"] = cajas_entradas
     k["bc_bal_cajas_ventas"] = cajas_ventas
+    k["bc_bal_cajas_ajustes_neg"] = cajas_ajustes_neg
     k["bc_bal_cajas_stock_teorico"] = cajas_stock_teorico
     k["bc_bal_cajas_stock_real"] = cajas_stock_real
     k["bc_bal_cajas_check"] = cajas_check
+    k["bc_adj_neg_cajas"] = int(ajustes_neg_analisis.get("totales", {}).get("cajas") or 0)
+    k["bc_adj_neg_usuarios"] = int(ajustes_neg_analisis.get("totales", {}).get("usuarios") or 0)
+    k["bc_adj_neg_top_usuario"] = str(
+        ajustes_neg_analisis.get("totales", {}).get("top_usuario") or "—"
+    )
 
     report_data.setdefault("sql_trace", {"view_or_tables": [], "params": {}, "queries": []})
     report_data["sql_trace"]["queries"].extend(bc_balance["sql_trace"]["queries"])
@@ -3284,85 +3884,12 @@ def build_stock_merma_table_rows(detalle: list[dict[str, Any]]) -> str:
     return "\n".join(rows)
 
 
-BC_BALANCE_ESTADO_LABELS = {
-    "stock_final": "Stock final",
-    "vendido": "Vendido",
-    "apertura": "Apertura",
-    "empaque_mes": "Empaque mes",
-}
-
-
-def build_bc_balance_eg_lote_detail_table(lotes: list[dict[str, Any]]) -> str:
-    body_rows: list[str] = []
-    for lot in lotes:
-        estado = BC_BALANCE_ESTADO_LABELS.get(str(lot.get("estado")), str(lot.get("estado")))
-        body_rows.append(
-            "<tr>"
-            f"<td><code>{html.escape(str(lot['lot']))}</code></td>"
-            f"<td>{html.escape(str(lot.get('tipo_nombre', '')))}</td>"
-            f"<td>{html.escape(str(lot.get('item_no') or '—'))}</td>"
-            f"<td>{_format_sql_date(lot.get('fe_empaque'))}</td>"
-            f"<td class='num'>{fmt_num(lot.get('kg_innova', 0))}</td>"
-            f"<td class='num'>{int(lot.get('packs_innova', 0))}</td>"
-            f"<td class='num'>{fmt_num(lot.get('kg_bc', 0))}</td>"
-            f"<td class='num'>{fmt_num(lot.get('kg_ventas_bc', 0))}</td>"
-            f"<td class='num'>{fmt_num(lot.get('kg_stock_final', 0))}</td>"
-            f"<td>{html.escape(estado)}</td>"
-            "</tr>"
-        )
-    if not body_rows:
-        return "<p class='muted'>Sin lotes para este tipo de producto.</p>"
-    return (
-        "<table class='bc-lot-table'>"
-        "<thead><tr>"
-        "<th>Lote</th><th>Producto</th><th>Item BC</th><th>Fecha empaque</th>"
-        "<th class='num'>Kg Innova</th><th class='num'>Cajas</th>"
-        "<th class='num'>Kg BC</th><th class='num'>Kg ventas BC</th>"
-        "<th class='num'>Kg stock final</th><th>Estado</th>"
-        "</tr></thead><tbody>"
-        + "".join(body_rows)
-        + "</tbody></table>"
-    )
-
-
-def build_bc_balance_eg_lote_table_rows(lot_detalle: list[dict[str, Any]]) -> str:
-    rows: list[str] = []
-    for lot in lot_detalle:
-        estado = BC_BALANCE_ESTADO_LABELS.get(str(lot.get("estado")), str(lot.get("estado")))
-        rows.append(
-            "<tr>"
-            f"<td>{html.escape(str(lot.get('cod_producto') or lot.get('material') or '—'))}</td>"
-            f"<td>{html.escape(str(lot.get('material_nombre') or lot.get('tipo_nombre') or '—'))}</td>"
-            f"<td><code>{html.escape(str(lot['lot']))}</code></td>"
-            f"<td>{html.escape(str(lot.get('material') or '—'))}</td>"
-            f"<td>{html.escape(str(lot.get('pattern') or lot.get('item_no') or '—'))}</td>"
-            f"<td>{_format_sql_date(lot.get('fe_empaque'))}</td>"
-            f"<td>{_format_sql_date(lot.get('prday_min'))}</td>"
-            f"<td class='num'>{fmt_num(lot.get('kg_innova', 0))}</td>"
-            f"<td class='num'>{int(lot.get('packs_innova', 0))}</td>"
-            f"<td class='num'>{fmt_num(lot.get('kg_bc', 0))}</td>"
-            f"<td class='num'>{fmt_num(lot.get('kg_ventas_bc', 0))}</td>"
-            f"<td class='num'>{fmt_num(lot.get('kg_stock_final', 0))}</td>"
-            f"<td>{html.escape(estado)}</td>"
-            "</tr>"
-        )
-    return "\n".join(rows)
-
-
 def build_bc_balance_eg_tipo_table_rows(detalle_por_tipo: list[dict[str, Any]]) -> str:
     rows: list[str] = []
     for tipo in detalle_por_tipo:
-        tipo_id = html.escape(_tipo_slug(str(tipo.get("tipo_key"))))
-        lotes = tipo.get("lotes_detalle") or []
-        detail_id = f"bc-bal-tipo-{tipo_id}"
         rows.append(
-            "<tr class='bc-date-row'>"
-            f"<td class='bc-date-cell'>"
-            f"<button type='button' class='bc-toggle' aria-expanded='false' "
-            f"aria-controls='{detail_id}' title='Ver lotes del tipo'>▸</button> "
-            f"{html.escape(str(tipo.get('cod_producto') or tipo.get('material') or '—'))}"
-            f"<span class='bc-date-meta muted'> ({int(tipo.get('lotes', 0))} lotes)</span>"
-            "</td>"
+            "<tr>"
+            f"<td><code>{html.escape(str(tipo.get('cod_producto') or tipo.get('material') or '—'))}</code></td>"
             f"<td>{html.escape(str(tipo.get('tipo_nombre') or '—'))}</td>"
             f"<td>{html.escape(str(tipo.get('material') or '—'))}</td>"
             f"<td>{html.escape(str(tipo.get('pattern') or tipo.get('item_no') or '—'))}</td>"
@@ -3371,9 +3898,6 @@ def build_bc_balance_eg_tipo_table_rows(detalle_por_tipo: list[dict[str, Any]]) 
             f"<td class='num'>{fmt_num(tipo.get('kg_innova', 0))}</td>"
             f"<td class='num'>{fmt_num(tipo.get('kg_ventas_bc', 0))}</td>"
             f"<td class='num'>{fmt_num(tipo.get('kg_stock_final', 0))}</td>"
-            "</tr>"
-            f"<tr id='{detail_id}' class='bc-detail-row' hidden>"
-            f"<td colspan='9'>{build_bc_balance_eg_lote_detail_table(lotes)}</td>"
             "</tr>"
         )
     return "\n".join(rows)
@@ -3440,11 +3964,9 @@ def build_bc_balance_eg_section_html(
     rows_html = build_bc_balance_eg_table_rows(detalle)
     check_rows_html = build_bc_check_diario_table_rows(detalle)
     detalle_por_tipo = bc_balance.get("detalle_por_tipo") or []
-    lot_detalle = bc_balance.get("lot_detalle") or []
     tipo_rows_html = build_bc_balance_eg_tipo_table_rows(detalle_por_tipo)
-    lote_rows_html = build_bc_balance_eg_lote_table_rows(lot_detalle)
     tot_tipos = len(detalle_por_tipo)
-    tot_lotes_det = len(lot_detalle)
+    tot_lotes_det = sum(int(t.get("lotes") or 0) for t in detalle_por_tipo)
     tot_lotes_stock_final = sum(int(t.get("lotes_stock_final") or 0) for t in detalle_por_tipo)
     tot_kg_innova_lotes = sum(to_float(t.get("kg_innova")) for t in detalle_por_tipo)
     tot_kg_ventas_lotes = sum(to_float(t.get("kg_ventas_bc")) for t in detalle_por_tipo)
@@ -3603,7 +4125,7 @@ def build_bc_balance_eg_section_html(
         <p class="muted" style="margin-top:0;">
           Producto BC desde <code>bc.[Conversion productos]</code>
           (<code>Cod. bascula</code> = material Innova → <code>Cod. producto</code>).
-          Pulsa ▸ para ver los lotes del tipo.
+          Resumen agregado por tipo (sin detalle por lote).
           {tot_tipos:,} productos · {tot_lotes_det:,} lotes en el periodo.
         </p>
         <table id="bcBalanceEgTipoTable">
@@ -3633,51 +4155,12 @@ def build_bc_balance_eg_section_html(
           </tbody>
         </table>
       </article>
-      <article class="chart-card" style="margin-top:14px;">
-        <div class="section-head">
-          <h3>Detalle por lote</h3>
-          <button type="button" class="btn-export" data-table-id="bcBalanceEgLoteTable" data-file-name="balance_bc_eg_por_lote">
-            <span class="excel-icon">X</span>
-            Exportar Excel
-          </button>
-        </div>
-        <p class="muted" style="margin-top:0;">
-          Lote = <code>proc_packs.number</code> (Innova) / <code>[Lot No.]</code> (BC).
-          Estados: stock final (sin venta en el mes), vendido, apertura (empaque previo al periodo).
-        </p>
-        <table id="bcBalanceEgLoteTable">
-          <thead>
-            <tr>
-              <th>Cod. producto</th>
-              <th>Producto</th>
-              <th>Lote</th>
-              <th>Cod. bascula</th>
-              <th>Pattern / Item</th>
-              <th>Fecha empaque</th>
-              <th>Salida Innova</th>
-              <th class="num">Kg Innova</th>
-              <th class="num">Cajas</th>
-              <th class="num">Kg BC</th>
-              <th class="num">Kg ventas BC</th>
-              <th class="num">Kg stock final</th>
-              <th>Estado</th>
-            </tr>
-          </thead>
-          <tbody>
-            {lote_rows_html}
-          </tbody>
-        </table>
-      </article>
       <section class="premisa-box" style="margin-top:14px;">
         <h3 class="premisa-head">Reglas balance BC E/G</h3>
         <ul class="premisa-list">{reglas_items}</ul>
         <p class="premisa-note muted">
           Lotes con empaque en el periodo (BC): {bc_balance['lotes_empaque_mes']:,}.
           Tolerancia check: ±{fmt_num(BC_BALANCE_CHECK_TOLERANCE_KG, 0)} kg.
-        </p>
-        <p class="premisa-note nota-bc-ajustes-inline">
-          <strong>{html.escape(NOTA_BC_AJUSTES_NEGATIVOS_TITULO)}:</strong>
-          {html.escape(NOTA_BC_AJUSTES_NEGATIVOS)}
         </p>
       </section>
     """
@@ -3697,6 +4180,7 @@ def build_bc_balance_tipo_cajas_table_rows(detalle: list[dict[str, Any]]) -> str
             f"<td class='num'>{int(tipo.get('cajas_stock_inicial') or 0):,}</td>"
             f"<td class='num'>{int(tipo.get('cajas_entradas') or 0):,}</td>"
             f"<td class='num'>{int(tipo.get('cajas_ventas') or 0):,}</td>"
+            f"<td class='num'>{int(tipo.get('cajas_ajustes_neg') or 0):,}</td>"
             f"<td class='num'>{int(tipo.get('cajas_stock_teorico') or 0):,}</td>"
             f"<td class='num'>{int(tipo.get('cajas_stock_real') or 0):,}</td>"
             f"<td class='num{check_class}'>{check_val:,}</td>"
@@ -3716,6 +4200,7 @@ def build_bc_balance_diario_cajas_table_rows(detalle: list[dict[str, Any]]) -> s
             f"<td class='num'>{int(r.get('cajas_stock_inicial') or 0):,}</td>"
             f"<td class='num'>{int(r.get('cajas_entradas') or 0):,}</td>"
             f"<td class='num'>{int(r.get('cajas_ventas') or 0):,}</td>"
+            f"<td class='num'>{int(r.get('cajas_ajustes_neg') or 0):,}</td>"
             f"<td class='num'>{int(r.get('cajas_stock_teorico') or 0):,}</td>"
             f"<td class='num'>{int(r.get('cajas_stock_real') or 0):,}</td>"
             f"<td class='num{check_class}'>{check_val:,}</td>"
@@ -3744,6 +4229,7 @@ def build_bc_balance_tipo_cajas_section_html(
     cajas_ini = int(bc_balance.get("cajas_stock_inicial") or 0)
     cajas_ent = int(bc_balance.get("cajas_entradas") or 0)
     cajas_ven = int(bc_balance.get("cajas_ventas") or 0)
+    cajas_adj = int(bc_balance.get("cajas_ajustes_neg") or 0)
     cajas_teo = int(bc_balance.get("cajas_stock_teorico") or 0)
     cajas_real = int(bc_balance.get("cajas_stock_real") or 0)
     cajas_check = int(bc_balance.get("cajas_check") or 0)
@@ -3768,9 +4254,14 @@ def build_bc_balance_tipo_cajas_section_html(
           <div class="kpi-sub">Sale · Entry Type 1 · E/G · ABS(Quantity)</div>
         </article>
         <article class="card">
+          <div class="kpi-title">Ajustes negativos BC</div>
+          <div class="kpi-value">{cajas_adj:,}</div>
+          <div class="kpi-sub">Negative Adjmt. · Entry Type 3 · E/G · ABS(Quantity)</div>
+        </article>
+        <article class="card">
           <div class="kpi-title">Stock final teorico (cajas)</div>
           <div class="kpi-value">{cajas_teo:,}</div>
-          <div class="kpi-sub">Inicial + Entradas − Ventas</div>
+          <div class="kpi-sub">Inicial + Entradas − Ventas − Ajustes neg.</div>
         </article>
         <article class="card">
           <div class="kpi-title">Stock final real (cajas)</div>
@@ -3795,7 +4286,9 @@ def build_bc_balance_tipo_cajas_section_html(
           Igual que el balance consolidado:
           <strong>stock final teorico del dia N = stock inicial del dia N+1</strong>.
           Dia 1 parte del stock inicial ILE; el resto se arrastra.
-          <strong>Entradas</strong> = ajustes positivos BC; <strong>Ventas</strong> = ventas BC.
+          <strong>Entradas</strong> = ajustes positivos BC (Type 2);
+          <strong>Ventas</strong> = ventas BC (Type 1);
+          <strong>Ajustes neg.</strong> = Entry Type 3.
         </p>
         <table id="bcBalanceDiarioCajasTable">
           <thead>
@@ -3804,6 +4297,7 @@ def build_bc_balance_tipo_cajas_section_html(
               <th class="num">Stock inicial (cajas)</th>
               <th class="num">Entradas BC (ajustes +)</th>
               <th class="num">Ventas BC (cajas)</th>
+              <th class="num">Ajustes neg. BC</th>
               <th class="num">Stock final teorico</th>
               <th class="num">Stock final real</th>
               <th class="num">Check</th>
@@ -3816,6 +4310,7 @@ def build_bc_balance_tipo_cajas_section_html(
               <td class="num"><strong>{cajas_ini:,}</strong></td>
               <td class="num"><strong>{cajas_ent:,}</strong></td>
               <td class="num"><strong>{cajas_ven:,}</strong></td>
+              <td class="num"><strong>{cajas_adj:,}</strong></td>
               <td class="num"><strong>{cajas_teo:,}</strong></td>
               <td class="num"><strong>{cajas_real:,}</strong></td>
               <td class="num"><strong class="{check_class}">{cajas_check:,}</strong></td>
@@ -3836,6 +4331,7 @@ def build_bc_balance_tipo_cajas_section_html(
           (conversion <code>bc.[Conversion productos]</code> cuando hay enlace Innova).
           <strong>Entradas</strong> = ajustes positivos ILE (<code>Entry Type = 2</code>).
           <strong>Ventas</strong> = ventas ILE (<code>Entry Type = 1</code>).
+          <strong>Ajustes neg.</strong> = ILE (<code>Entry Type = 3</code>).
           Agregado por producto con <code>ABS([Quantity])</code>.
           Unidad stock = <strong>nº de cajas</strong> (1 lote = 1 caja).
           Periodo: <strong>{format_date_es(start)}</strong> a <strong>{format_date_es(end)}</strong>.
@@ -3856,6 +4352,7 @@ def build_bc_balance_tipo_cajas_section_html(
               <th class="num">Stock inicial (cajas)</th>
               <th class="num">Entradas BC (ajustes +)</th>
               <th class="num">Ventas BC (cajas)</th>
+              <th class="num">Ajustes neg. BC</th>
               <th class="num">Stock final teorico</th>
               <th class="num">Stock final real</th>
               <th class="num">Check</th>
@@ -3868,6 +4365,7 @@ def build_bc_balance_tipo_cajas_section_html(
               <td class="num"><strong>{cajas_ini:,}</strong></td>
               <td class="num"><strong>{cajas_ent:,}</strong></td>
               <td class="num"><strong>{cajas_ven:,}</strong></td>
+              <td class="num"><strong>{cajas_adj:,}</strong></td>
               <td class="num"><strong>{cajas_teo:,}</strong></td>
               <td class="num"><strong>{cajas_real:,}</strong></td>
               <td class="num"><strong class="{check_class}">{cajas_check:,}</strong></td>
@@ -3875,10 +4373,6 @@ def build_bc_balance_tipo_cajas_section_html(
           </tbody>
         </table>
       </article>
-      <p class="premisa-note nota-bc-ajustes-inline" style="margin-top:14px;">
-        <strong>{html.escape(NOTA_BC_AJUSTES_NEGATIVOS_TITULO)}:</strong>
-        {html.escape(NOTA_BC_AJUSTES_NEGATIVOS)}
-      </p>
     """
 
 
@@ -4050,6 +4544,337 @@ def build_bc_stock_final_section_html(
     """
 
 
+def build_bc_ajustes_neg_analisis_section_html(
+    start: dt.date,
+    end: dt.date,
+    bc_balance: dict[str, Any] | None,
+) -> str:
+    analisis = (bc_balance or {}).get("ajustes_neg_analisis") if bc_balance else None
+    if not bc_balance or not bc_balance.get("loaded") or not analisis or not analisis.get("loaded"):
+        return (
+            "<article class='chart-card'>"
+            "<h3>Analisis movimientos ILE (Type 1/2/3)</h3>"
+            "<p class='muted'>BC no disponible (--skip-bc o error de conexion).</p>"
+            "</article>"
+        )
+
+    tot = analisis.get("totales") or {}
+    checks = analisis.get("checks") or {}
+    integ = analisis.get("integridad") or {}
+    alertas = analisis.get("alertas") or []
+    por_tipo = analisis.get("por_tipo") or []
+    por_usuario = analisis.get("por_usuario") or []
+    por_dia = analisis.get("por_dia") or []
+    por_producto = analisis.get("por_producto") or []
+
+    def _rows_tipo() -> str:
+        rows: list[str] = []
+        for t in por_tipo:
+            ok = bool(t.get("ok_qty_vs_lote"))
+            flag = "ok" if ok else "check-warn-cell"
+            rows.append(
+                "<tr>"
+                f"<td>{html.escape(str(t.get('tipo_label') or '—'))}</td>"
+                f"<td class='num'>{int(t.get('cajas') or 0):,}</td>"
+                f"<td class='num'>{int(t.get('lotes') or 0):,}</td>"
+                f"<td class='num {flag}'>{int(t.get('delta_qty_lotes') or 0):,}</td>"
+                f"<td class='num'>{fmt_num(t.get('kg', 0))}</td>"
+                f"<td class='num'>{int(t.get('movimientos') or 0):,}</td>"
+                f"<td class='num'>{int(t.get('mov_qty_ne_1') or 0):,}</td>"
+                f"<td class='num'>{int(t.get('mov_kg_0') or 0):,}</td>"
+                f"<td class='num'>{to_float(t.get('pct_kg_0')):.0f}%</td>"
+                "</tr>"
+            )
+        return "\n".join(rows)
+
+    def _rows_alertas() -> str:
+        if not alertas:
+            return "<tr><td colspan='3'><em>Sin alertas.</em></td></tr>"
+        rows: list[str] = []
+        for a in alertas:
+            nivel = str(a.get("nivel") or "info")
+            cls = "check-ok" if nivel == "ok" else ("check-warn" if nivel == "warn" else "")
+            rows.append(
+                "<tr>"
+                f"<td class='{cls}'><strong>{html.escape(str(a.get('titulo') or ''))}</strong></td>"
+                f"<td><code>{html.escape(str(a.get('codigo') or ''))}</code></td>"
+                f"<td>{html.escape(str(a.get('detalle') or ''))}</td>"
+                "</tr>"
+            )
+        return "\n".join(rows)
+
+    def _rows_usuario() -> str:
+        rows: list[str] = []
+        for u in por_usuario:
+            rows.append(
+                "<tr>"
+                f"<td><code>{html.escape(str(u.get('usuario') or '—'))}</code></td>"
+                f"<td class='num'>{int(u.get('cajas') or 0):,}</td>"
+                f"<td class='num'>{fmt_num(u.get('kg', 0))}</td>"
+                f"<td class='num'>{int(u.get('movimientos') or 0):,}</td>"
+                f"<td class='num'>{int(u.get('lotes') or 0):,}</td>"
+                f"<td class='num'>{int(u.get('dias') or 0):,}</td>"
+                f"<td class='num'>{int(u.get('productos') or 0):,}</td>"
+                "</tr>"
+            )
+        return "\n".join(rows)
+
+    def _rows_dia() -> str:
+        rows: list[str] = []
+        for d in por_dia:
+            rows.append(
+                "<tr>"
+                f"<td>{html.escape(str(d.get('fecha') or '—'))}</td>"
+                f"<td class='num'>{int(d.get('cajas') or 0):,}</td>"
+                f"<td class='num'>{fmt_num(d.get('kg', 0))}</td>"
+                f"<td class='num'>{int(d.get('movimientos') or 0):,}</td>"
+                f"<td class='num'>{int(d.get('usuarios') or 0):,}</td>"
+                f"<td class='num'>{int(d.get('lotes') or 0):,}</td>"
+                "</tr>"
+            )
+        return "\n".join(rows)
+
+    def _rows_producto() -> str:
+        rows: list[str] = []
+        for p in por_producto:
+            rows.append(
+                "<tr>"
+                f"<td><code>{html.escape(str(p.get('item_no') or '—'))}</code></td>"
+                f"<td>{html.escape(str(p.get('item_description') or p.get('item_no') or '—'))}</td>"
+                f"<td class='num'>{int(p.get('cajas') or 0):,}</td>"
+                f"<td class='num'>{fmt_num(p.get('kg', 0))}</td>"
+                f"<td class='num'>{int(p.get('movimientos') or 0):,}</td>"
+                f"<td class='num'>{int(p.get('usuarios') or 0):,}</td>"
+                "</tr>"
+            )
+        return "\n".join(rows)
+
+    cajas = int(tot.get("cajas") or 0)
+    kg = to_float(tot.get("kg"))
+    n_users = int(tot.get("usuarios") or 0)
+    n_dias = int(tot.get("dias") or 0)
+    n_prod = int(tot.get("productos") or 0)
+    top_user = str(tot.get("top_usuario") or "—")
+    cajas_check = int(checks.get("cajas_check") or 0)
+    kg_check_v = to_float(checks.get("kg_check"))
+    cajas_cls = "check-ok" if checks.get("ecuacion_cajas_ok") else "check-warn"
+    kg_cls = "check-ok" if checks.get("ecuacion_kg_ok") else "check-warn"
+    doble = int(integ.get("lotes_venta_y_neg") or 0)
+
+    return f"""
+      <header class="panel-intro">
+        <h2>Análisis de movimientos ILE (E/G)</h2>
+        <p>
+          Validación de la ecuación de balance y desglose de ventas (Type 1),
+          ajustes positivos (Type 2) y ajustes negativos (Type 3) por usuario, día y producto.
+          Periodo: <strong>{format_date_es(start)}</strong> – <strong>{format_date_es(end)}</strong>.
+        </p>
+      </header>
+      <article class="chart-card">
+        <h3>Validación de ecuación (kg vs cajas)</h3>
+        <p class="muted" style="margin-top:0;">
+          Los checks <strong>no son comparables 1:1</strong>: kg usa
+          <code>Inicial + Salidas Innova − Ventas Type 1</code>;
+          cajas usa <code>Inicial + Type 2 − Type 1 − Type 3</code> con
+          <code>ABS(Quantity)</code>, mientras el stock real cuenta <strong>1 lote = 1 caja</strong>.
+        </p>
+        <section class="grid">
+          <article class="card {kg_cls}">
+            <div class="kpi-title">Check kg</div>
+            <div class="kpi-value">{fmt_num(kg_check_v)}</div>
+            <div class="kpi-sub">Teorico {fmt_num(checks.get('kg_stock_teorico'))} − Real {fmt_num(checks.get('kg_stock_real'))}</div>
+          </article>
+          <article class="card {cajas_cls}">
+            <div class="kpi-title">Check cajas</div>
+            <div class="kpi-value">{cajas_check:,}</div>
+            <div class="kpi-sub">Teorico {int(checks.get('cajas_stock_teorico') or 0):,} − Real {int(checks.get('cajas_stock_real') or 0):,}</div>
+          </article>
+          <article class="card">
+            <div class="kpi-title">Lotes venta+neg</div>
+            <div class="kpi-value">{doble:,}</div>
+            <div class="kpi-sub">Doble salida en formula de cajas</div>
+          </article>
+          <article class="card">
+            <div class="kpi-title">Type 3 cajas / kg</div>
+            <div class="kpi-value" style="font-size:1.2rem;">{int(tot.get('type3_cajas') or 0):,} / {fmt_num(kg)}</div>
+            <div class="kpi-sub">Muchos Type 3 tienen Kilos=0</div>
+          </article>
+        </section>
+        <table id="bcAdjIntegridadAlertasTable" style="margin-top:12px;">
+          <thead>
+            <tr><th>Indicador</th><th>Codigo</th><th>Detalle</th></tr>
+          </thead>
+          <tbody>
+            {_rows_alertas()}
+          </tbody>
+        </table>
+      </article>
+
+      <article class="chart-card" style="margin-top:14px;">
+        <div class="section-head">
+          <h3>Resumen Type 1 / 2 / 3 (coherencia Quantity vs lote)</h3>
+          <button type="button" class="btn-export" data-table-id="bcAdjPorTipoTable" data-file-name="bc_movimientos_por_tipo">
+            <span class="excel-icon">X</span>
+            Exportar Excel
+          </button>
+        </div>
+        <p class="muted" style="margin-top:0;">
+          Si <strong>Cajas − Lotes</strong> es grande, ABS(Quantity) no equivale a 1 caja/lote
+          (indicador incorrecto para un stock contado por lote).
+        </p>
+        <table id="bcAdjPorTipoTable">
+          <thead>
+            <tr>
+              <th>Tipo</th>
+              <th class="num">Cajas (ABS Qty)</th>
+              <th class="num">Lotes</th>
+              <th class="num">Cajas − Lotes</th>
+              <th class="num">Kg</th>
+              <th class="num">Movimientos</th>
+              <th class="num">Mov. Qty≠1</th>
+              <th class="num">Mov. Kg=0</th>
+              <th class="num">% Kg=0</th>
+            </tr>
+          </thead>
+          <tbody>
+            {_rows_tipo()}
+          </tbody>
+        </table>
+      </article>
+
+      <section class="grid" style="margin-top:14px;">
+        <article class="card">
+          <div class="kpi-title">Ventas Type 1</div>
+          <div class="kpi-value">{int(tot.get('type1_cajas') or 0):,}</div>
+          <div class="kpi-sub">ABS(Quantity) · E/G</div>
+        </article>
+        <article class="card">
+          <div class="kpi-title">Ajustes + Type 2</div>
+          <div class="kpi-value">{int(tot.get('type2_cajas') or 0):,}</div>
+          <div class="kpi-sub">Entradas BC</div>
+        </article>
+        <article class="card">
+          <div class="kpi-title">Ajustes − Type 3</div>
+          <div class="kpi-value">{cajas:,}</div>
+          <div class="kpi-sub">Top usuario: {html.escape(top_user)}</div>
+        </article>
+        <article class="card">
+          <div class="kpi-title">Usuarios Type 3</div>
+          <div class="kpi-value">{n_users:,}</div>
+          <div class="kpi-sub">Id. usuario · {n_dias:,} dias · {n_prod:,} productos</div>
+        </article>
+      </section>
+
+      <section class="charts" style="margin-top:14px;">
+        <article class="chart-card chart-panel">
+          <h3>Volumen por tipo (cajas)</h3>
+          <button type="button" class="btn-max" data-chart="adjByType">Maximizar</button>
+          <canvas id="adjByType"></canvas>
+        </article>
+        <article class="chart-card chart-panel">
+          <h3>Ajustes negativos por usuario (cajas)</h3>
+          <button type="button" class="btn-max" data-chart="adjNegByUser">Maximizar</button>
+          <canvas id="adjNegByUser"></canvas>
+        </article>
+        <article class="chart-card chart-panel">
+          <h3>Evolucion diaria Type 3 (apilado por usuario)</h3>
+          <button type="button" class="btn-max" data-chart="adjNegByDayStacked">Maximizar</button>
+          <canvas id="adjNegByDayStacked"></canvas>
+        </article>
+        <article class="chart-card chart-panel">
+          <h3>Top productos Type 3 (cajas)</h3>
+          <button type="button" class="btn-max" data-chart="adjNegByProduct">Maximizar</button>
+          <canvas id="adjNegByProduct"></canvas>
+        </article>
+      </section>
+
+      <article class="chart-card" style="margin-top:14px;">
+        <div class="section-head">
+          <h3>Type 3 por usuario</h3>
+          <button type="button" class="btn-export" data-table-id="bcAdjNegUsuarioTable" data-file-name="bc_ajustes_neg_por_usuario">
+            <span class="excel-icon">X</span>
+            Exportar Excel
+          </button>
+        </div>
+        <table id="bcAdjNegUsuarioTable">
+          <thead>
+            <tr>
+              <th>Usuario</th>
+              <th class="num">Cajas</th>
+              <th class="num">Kg</th>
+              <th class="num">Movimientos</th>
+              <th class="num">Lotes</th>
+              <th class="num">Dias</th>
+              <th class="num">Productos</th>
+            </tr>
+          </thead>
+          <tbody>
+            {_rows_usuario()}
+            <tr>
+              <td><strong>TOTAL</strong></td>
+              <td class="num"><strong>{cajas:,}</strong></td>
+              <td class="num"><strong>{fmt_num(kg)}</strong></td>
+              <td class="num"><strong>{int(tot.get('movimientos') or 0):,}</strong></td>
+              <td class="num"><strong>{int(tot.get('lotes') or 0):,}</strong></td>
+              <td class="num"><strong>{n_dias:,}</strong></td>
+              <td class="num"><strong>{n_prod:,}</strong></td>
+            </tr>
+          </tbody>
+        </table>
+      </article>
+
+      <article class="chart-card" style="margin-top:14px;">
+        <div class="section-head">
+          <h3>Type 3 por dia</h3>
+          <button type="button" class="btn-export" data-table-id="bcAdjNegDiaTable" data-file-name="bc_ajustes_neg_por_dia">
+            <span class="excel-icon">X</span>
+            Exportar Excel
+          </button>
+        </div>
+        <table id="bcAdjNegDiaTable">
+          <thead>
+            <tr>
+              <th>Fecha</th>
+              <th class="num">Cajas</th>
+              <th class="num">Kg</th>
+              <th class="num">Movimientos</th>
+              <th class="num">Usuarios</th>
+              <th class="num">Lotes</th>
+            </tr>
+          </thead>
+          <tbody>
+            {_rows_dia()}
+          </tbody>
+        </table>
+      </article>
+
+      <article class="chart-card" style="margin-top:14px;">
+        <div class="section-head">
+          <h3>Type 3 por producto</h3>
+          <button type="button" class="btn-export" data-table-id="bcAdjNegProductoTable" data-file-name="bc_ajustes_neg_por_producto">
+            <span class="excel-icon">X</span>
+            Exportar Excel
+          </button>
+        </div>
+        <table id="bcAdjNegProductoTable">
+          <thead>
+            <tr>
+              <th>Cod. producto</th>
+              <th>Descripcion</th>
+              <th class="num">Cajas</th>
+              <th class="num">Kg</th>
+              <th class="num">Movimientos</th>
+              <th class="num">Usuarios</th>
+            </tr>
+          </thead>
+          <tbody>
+            {_rows_producto()}
+          </tbody>
+        </table>
+      </article>
+    """
+
+
 def _format_bc_posting_range(pedido: dict[str, Any]) -> str:
     date_min = pedido.get("posting_date_min")
     date_max = pedido.get("posting_date_max")
@@ -4204,6 +5029,20 @@ def render_html(
     bc_balance_tipo_cajas_html = build_bc_balance_tipo_cajas_section_html(start, end, bc_balance_eg)
     bc_stock_inicial_html = build_bc_stock_inicial_section_html(start, end, bc_balance_eg)
     bc_stock_final_html = build_bc_stock_final_section_html(start, end, bc_balance_eg)
+    bc_ajustes_neg_analisis_html = build_bc_ajustes_neg_analisis_section_html(
+        start, end, bc_balance_eg
+    )
+    adj_charts = ((bc_balance_eg or {}).get("ajustes_neg_analisis") or {}).get("charts") or {}
+    adj_user_labels = adj_charts.get("user_labels") or []
+    adj_user_cajas = adj_charts.get("user_cajas") or []
+    adj_user_colors = adj_charts.get("user_colors") or []
+    adj_day_labels = adj_charts.get("day_labels") or []
+    adj_stacked = adj_charts.get("stacked_datasets") or []
+    adj_product_labels = adj_charts.get("product_labels") or []
+    adj_product_cajas = adj_charts.get("product_cajas") or []
+    adj_type_labels = adj_charts.get("type_labels") or []
+    adj_type_cajas = adj_charts.get("type_cajas") or []
+    adj_type_colors = adj_charts.get("type_colors") or []
     bc_loaded = bool(data.get("bc_cruce"))
     bc_note = (
         "Enlace por proc_packs.number = BC Item Ledger Entry [Lot No.]. "
@@ -4274,8 +5113,7 @@ def render_html(
     source_definition = build_source_definition(data_source)
     premisa_entrada_html = build_premisa_entrada_html()
     intro_html = build_report_intro_html(start, end, k, source_definition, bc_loaded)
-    nota_alerta_vap_html = build_nota_alerta_vap_html()
-    nota_bc_ajustes_html = build_nota_bc_ajustes_negativos_html()
+    report_footnotes_html = build_report_footnotes_html()
     trace_tables = ", ".join(sql_trace.get("view_or_tables", []))
     trace_params = sql_trace.get("params", {})
     trace_query_items = []
@@ -4633,7 +5471,7 @@ def render_html(
       color: #78350f;
     }}
     .nota-alerta-vap {{
-      margin: 24px 0 8px 0;
+      margin: 0;
       padding: 14px 16px;
       border: 1px solid #f59e0b;
       border-radius: 12px;
@@ -4651,8 +5489,13 @@ def render_html(
       line-height: 1.45;
       color: #78350f;
     }}
+    .report-footnotes {{
+      margin: 20px 0 8px 0;
+      display: grid;
+      gap: 12px;
+    }}
     .nota-bc-ajustes {{
-      margin: 12px 0 8px 0;
+      margin: 0;
       padding: 14px 16px;
       border: 1px solid #8fc6de;
       border-radius: 12px;
@@ -4670,14 +5513,23 @@ def render_html(
       line-height: 1.45;
       color: #0b2740;
     }}
-    .nota-bc-ajustes-inline {{
-      margin-top: 10px;
-      padding: 10px 12px;
-      border-left: 4px solid var(--brand-mid);
-      background: #eef7fb;
-      color: #0b2740;
-      font-size: 13px;
-      line-height: 1.45;
+    .panel-intro {{
+      margin: 0 0 16px 0;
+      padding: 16px 18px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: linear-gradient(135deg, #f7fbfe 0%, #eef6fa 100%);
+    }}
+    .panel-intro h2 {{
+      margin: 0 0 8px 0;
+      font-size: 1.25rem;
+      color: var(--brand);
+    }}
+    .panel-intro p {{
+      margin: 0;
+      font-size: 14px;
+      line-height: 1.5;
+      color: #334155;
     }}
     .trace-box {{
       margin-top: 18px;
@@ -5021,6 +5873,7 @@ def render_html(
       <button type="button" class="tab-btn" role="tab" aria-selected="false" aria-controls="tab-bc-tipo-cajas" data-tab="tab-bc-tipo-cajas" id="tab-btn-bc-tipo-cajas">Balance por tipo (cajas)</button>
       <button type="button" class="tab-btn" role="tab" aria-selected="false" aria-controls="tab-bc-stock-ini" data-tab="tab-bc-stock-ini" id="tab-btn-bc-stock-ini">Stock inicial BC E/G</button>
       <button type="button" class="tab-btn" role="tab" aria-selected="false" aria-controls="tab-bc-stock-fin" data-tab="tab-bc-stock-fin" id="tab-btn-bc-stock-fin">Stock final BC E/G</button>
+      <button type="button" class="tab-btn" role="tab" aria-selected="false" aria-controls="tab-bc-adj-neg" data-tab="tab-bc-adj-neg" id="tab-btn-bc-adj-neg">Análisis ILE (1/2/3)</button>
       <button type="button" class="tab-btn" role="tab" aria-selected="false" aria-controls="tab-materiales" data-tab="tab-materiales" id="tab-btn-materiales">Materiales</button>
       <button type="button" class="tab-btn tab-btn-debug" role="tab" aria-selected="false" aria-controls="tab-debug" data-tab="tab-debug" id="tab-btn-debug">Debug</button>
     </nav>
@@ -5185,6 +6038,10 @@ def render_html(
         {bc_stock_final_html}
       </section>
 
+      <section class="tab-panel" id="tab-bc-adj-neg" role="tabpanel" aria-labelledby="tab-btn-bc-adj-neg">
+        {bc_ajustes_neg_analisis_html}
+      </section>
+
       <section class="tab-panel" id="tab-materiales" role="tabpanel" aria-labelledby="tab-btn-materiales">
         <section class="tables">
           <article class="chart-card">
@@ -5230,8 +6087,7 @@ def render_html(
       </section>
     </div>
 
-    {nota_alerta_vap_html}
-    {nota_bc_ajustes_html}
+    {report_footnotes_html}
 
     <div id="chartModal" class="chart-modal" aria-hidden="true">
       <div class="chart-modal-content" role="dialog" aria-modal="true" aria-labelledby="chartModalTitle">
@@ -5256,6 +6112,16 @@ const acumulado = {json.dumps(acumulado)};
 const stockEntrada = {json.dumps(stock_entrada_chart)};
 const merma = {json.dumps(merma)};
 const balance = entrada.map((v, i) => Number((v - salida[i]).toFixed(2)));
+const adjNegUserLabels = {json.dumps(adj_user_labels)};
+const adjNegUserCajas = {json.dumps(adj_user_cajas)};
+const adjNegUserColors = {json.dumps(adj_user_colors)};
+const adjNegDayLabels = {json.dumps(adj_day_labels)};
+const adjNegStacked = {json.dumps(adj_stacked)};
+const adjNegProductLabels = {json.dumps(adj_product_labels)};
+const adjNegProductCajas = {json.dumps(adj_product_cajas)};
+const adjTypeLabels = {json.dumps(adj_type_labels)};
+const adjTypeCajas = {json.dumps(adj_type_cajas)};
+const adjTypeColors = {json.dumps(adj_type_colors)};
 
 const chartConfigs = {{
   lineKg: {{
@@ -5324,12 +6190,81 @@ const chartConfigs = {{
       }}]
     }},
     options: {{ responsive: true, maintainAspectRatio: false }}
+  }},
+  adjNegByUser: {{
+    type: 'bar',
+    data: {{
+      labels: adjNegUserLabels,
+      datasets: [{{
+        label: 'Cajas ajuste neg.',
+        data: adjNegUserCajas,
+        backgroundColor: adjNegUserColors
+      }}]
+    }},
+    options: {{
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {{ legend: {{ display: false }} }},
+      scales: {{ y: {{ beginAtZero: true }} }}
+    }}
+  }},
+  adjByType: {{
+    type: 'bar',
+    data: {{
+      labels: adjTypeLabels,
+      datasets: [{{
+        label: 'Cajas (ABS Quantity)',
+        data: adjTypeCajas,
+        backgroundColor: adjTypeColors
+      }}]
+    }},
+    options: {{
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {{ legend: {{ display: false }} }},
+      scales: {{ y: {{ beginAtZero: true }} }}
+    }}
+  }},
+  adjNegByDayStacked: {{
+    type: 'bar',
+    data: {{
+      labels: adjNegDayLabels,
+      datasets: adjNegStacked
+    }},
+    options: {{
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {{
+        x: {{ stacked: true }},
+        y: {{ stacked: true, beginAtZero: true }}
+      }}
+    }}
+  }},
+  adjNegByProduct: {{
+    type: 'bar',
+    data: {{
+      labels: adjNegProductLabels,
+      datasets: [{{
+        label: 'Cajas ajuste neg.',
+        data: adjNegProductCajas,
+        backgroundColor: 'rgba(200,16,46,.75)'
+      }}]
+    }},
+    options: {{
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {{ legend: {{ display: false }} }},
+      scales: {{ x: {{ beginAtZero: true }} }}
+    }}
   }}
 }};
 
 const chartInstances = {{}};
 for (const [chartId, chartConfig] of Object.entries(chartConfigs)) {{
-  chartInstances[chartId] = new Chart(document.getElementById(chartId), chartConfig);
+  const canvas = document.getElementById(chartId);
+  if (!canvas) continue;
+  chartInstances[chartId] = new Chart(canvas, chartConfig);
 }}
 
 function activateTab(tabId) {{
@@ -5342,7 +6277,7 @@ function activateTab(tabId) {{
     btn.classList.toggle('active', isActive);
     btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
   }});
-  if (tabId === 'tab-graficas') {{
+  if (tabId === 'tab-graficas' || tabId === 'tab-bc-adj-neg') {{
     Object.values(chartInstances).forEach((chart) => chart.resize());
   }}
   if (location.hash !== `#${{tabId}}`) {{
@@ -5449,7 +6384,11 @@ function exportAllTablesToExcel(fileName) {{
     {{ sheetName: 'BC tipo cajas', tableId: 'bcBalanceTipoCajasTable' }},
     {{ sheetName: 'Stock ini BC', tableId: 'bcStockInicialProductoTable' }},
     {{ sheetName: 'Stock fin BC', tableId: 'bcStockFinalProductoTable' }},
-    {{ sheetName: 'BC E/G por lote', tableId: 'bcBalanceEgLoteTable' }},
+    {{ sheetName: 'Adj integridad', tableId: 'bcAdjIntegridadAlertasTable' }},
+    {{ sheetName: 'Adj por tipo', tableId: 'bcAdjPorTipoTable' }},
+    {{ sheetName: 'Adj neg usuario', tableId: 'bcAdjNegUsuarioTable' }},
+    {{ sheetName: 'Adj neg dia', tableId: 'bcAdjNegDiaTable' }},
+    {{ sheetName: 'Adj neg producto', tableId: 'bcAdjNegProductoTable' }},
     {{ sheetName: 'Top entrada', tableId: 'topEntradasTable' }},
     {{ sheetName: 'Top salida', tableId: 'topSalidasTable' }}
   ];
