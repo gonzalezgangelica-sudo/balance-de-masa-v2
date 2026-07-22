@@ -1,8 +1,8 @@
 # CALCULO_BIOMASA
 
-Informe de biomasa de planta (**Stolt Sea Farm**): consolida **Innova** (SQL Server) y **Business Central** (Azure SQL) en un HTML interactivo con KPIs, gráficas, tablas exportables a Excel y balance ERP por lote / producto.
+Informe de biomasa de planta (**Stolt Sea Farm**): consolida **Innova** (SQL Server) y **Business Central** (Azure SQL) en un HTML interactivo con KPIs, gráficas, tablas exportables a Excel y balance ERP por producto (sin detalle por lote en el HTML, para mantenerlo ligero).
 
-**Estado:** proyecto finalizado y validado (marzo–abril 2026).
+**Estado:** proyecto finalizado y validado (marzo–abril 2026). Última referencia operativa: **abril 2026**.
 
 Documento canónico de reglas: **[PREMISAS.md](PREMISAS.md)**.
 
@@ -119,7 +119,7 @@ Estado actual: el mecanismo de credenciales **por puesto** ya existe; falta el a
 | Entrega | Descripción |
 |---------|-------------|
 | Informe HTML | `Reports/reporte_biomasa_YYYYMMDD_YYYYMMDD.html` (autocontenido) |
-| Excel | Export desde el navegador (detalle, stock/merma, cruce BC, balance, materiales) |
+| Excel | Export desde el navegador (detalle, stock/merma, cruce BC, balances, análisis ILE, materiales) |
 | Premisas | Reglas en `PREMISAS.md` y bloque visible en el informe |
 
 ### Pestañas
@@ -130,12 +130,15 @@ Estado actual: el mecanismo de credenciales **por puesto** ya existe; falta el a
 4. **Detalle diario** — tabla día a día  
 5. **Balance** — entradas, salidas, stock y merma  
 6. **Cruce BC** — Innova ↔ ILE por lote (`number` = `[Lot No.]`)  
-7. **Balance BC E/G** — stock diario almacenes E/G (kg)  
-8. **Balance por tipo (cajas)** — entradas = ajustes + (Type 2); ventas = Sale (Type 1)  
-9. **Stock inicial BC E/G** — cajas y kg por tipo de producto a la fecha de inicio  
+7. **Balance BC E/G** — stock diario almacenes E/G (kg) + resumen por tipo de producto  
+8. **Balance por tipo (cajas)** — Inicial + Type 2 − Type 1 − Type 3  
+9. **Stock inicial BC E/G** — cajas y kg por tipo a la fecha de inicio  
 10. **Stock final BC E/G** — empaque del periodo pendiente de venta a la fecha de fin  
-11. **Materiales** — top entradas / salidas  
-12. **Debug** — trazas SQL (opcional)
+11. **Análisis ILE (1/2/3)** — validación de ecuación kg/cajas; Type 1/2/3 por usuario/día/producto  
+12. **Materiales** — top entradas / salidas  
+13. **Debug** — trazas SQL (opcional)
+
+Al pie del informe (una sola vez): nota VAP + nota de ajustes negativos Type 3.
 
 ---
 
@@ -206,11 +209,17 @@ Almacenes **E/G**. Histórico ILE desde **2026-01-01**. Encadenamiento: cierre d
 |---------|-----------|
 | Entradas | Positive Adjmt. · `Entry Type = 2` · `ABS(Quantity)` |
 | Ventas | Sale · `Entry Type = 1` · `ABS(Quantity)` |
+| Ajustes neg. | Negative Adjmt. · `Entry Type = 3` · `ABS(Quantity)` |
 | Producto | `Cod. producto` vía `bc.[Conversion productos]` (`Cod. bascula` = `material` Innova) |
 
-`Stock teórico = Stock inicial + Entradas − Ventas`.
+`Stock teórico = Stock inicial + Entradas − Ventas − Ajustes neg.`  
+Stock real = lotes en stock (1 lote = 1 caja). El check de cajas **no es comparable 1:1** con el de kg (fórmulas y unidades distintas).
 
-> **Nota VAP:** el producto VAP distorsiona stock de tinas / merma; limitación conocida.
+### Análisis ILE (pestaña)
+
+Validación de integridad Type **1 / 2 / 3** en E/G: Quantity vs nº de lotes, solapes venta+ajuste neg., Type 3 con `Kilos = 0`, y contraste check kg vs check cajas. Usuario BC = campo ILE `[Id. usuario]`.
+
+> **Nota VAP:** el producto VAP distorsiona stock de tinas / merma; limitación conocida (pie del informe).
 
 ---
 
@@ -264,7 +273,8 @@ Con el entorno ya creado:
 | Merma | −61.428,15 kg (−11,85 %) |
 | Cruce BC lotes | 66.384 / 71.174 (93,27 %) |
 | Balance BC E/G (check) | −70,56 kg |
-| Balance por tipo cajas | Entradas 74.352 · Ventas 73.320 · Check 2.526 |
+| Balance por tipo cajas | Inicial 6.829 · Entradas 74.352 · Ventas 73.320 · Ajustes neg. 3.884 · Teórico 3.977 · Real 4.205 · Check **−228** |
+| Análisis Type 3 | 3 usuarios · top **ACZ** · ~98 % movimientos Type 3 con Kilos=0 |
 
 ---
 
@@ -278,10 +288,11 @@ CALCULO_BIOMASA/
 ├── configurar_credenciales.py
 ├── ejecutar_reporte.bat            # Generar informe
 ├── generar_reporte_biomasa.py
+├── contrastar_lote_innova_bc.py
 ├── validar_dia_salidas.py
 ├── generar_documento_funcional.py
 ├── DOCUMENTO_FUNCIONAL_BIOMASA.docx
-├── PREMISAS.md
+├── PREMISAS.md                     # Reglas canónicas
 ├── README.md
 ├── requirements.txt
 ├── .env.example                    # Plantilla (sin secretos)

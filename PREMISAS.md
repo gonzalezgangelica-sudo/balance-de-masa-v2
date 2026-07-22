@@ -24,7 +24,7 @@ Documento canonico del proyecto **CALCULO_BIOMASA**. Cualquier cambio en reglas 
 | 5 | **Merma** — balance: Entradas TINA − Salidas CAJA − Stock de tinas | Confirmada (implementada) |
 | 6 | **Cruce BC / pedidos** — enlace por lote; ventas ILE; pedido desde albaran | Confirmada (implementada) |
 | 7 | Stock inventario / arrastre | Pendiente |
-| 8 | **Balance BC E/G** — stock inicial, salidas, ventas, teorico/real y check (almacenes E y G) | Confirmada (implementada) |
+| 8 | **Balance BC E/G** — stock kg, cajas (Type 2/1/3), stock ini/fin por producto, analisis ILE | Confirmada (implementada) |
 
 > Las reglas anteriores basadas en `regtime`, filtro `%tina%` en nombre de material, o totales de marzo 2026 con logica legacy **quedan sustituidas** por las premisas de esta seccion.
 
@@ -624,21 +624,24 @@ Ejemplo abril 2026: stock inicial al **01/04/2026**; stock final = empaque en ab
 
 Sin cambio de codigo en este repositorio: IT debe crear usuarios SQL (o grupo AD) individuales con solo lectura; cada puesto ya puede guardar su `DB_USER`/`DB_PASSWORD` con `configurar_credenciales.bat`. Ver README.
 
-En la pestaña **Balance BC E/G** el desglose es por **tipo de producto** (sin tabla de detalle por lote, para mantener el informe ligero). El pie de página documenta el tratamiento de ajustes negativos (Type 3).
+En la pestaña **Balance BC E/G** el desglose es por **tipo de producto** (sin tabla de detalle por lote, para mantener el informe ligero). La nota de ajustes negativos Type 3 aparece **una sola vez** al pie global del informe.
 
-### Pestaña Ajustes negativos (análisis)
+### Pestaña Análisis ILE (1/2/3)
 
-KPI / análisis de ILE `[Entry Type] = 3` en almacenes **E/G**:
+Validación de movimientos ILE en almacenes **E/G** (`Entry Type` 1 = venta, 2 = ajuste +, 3 = ajuste −):
 
-| Dimension | Campo |
-|-----------|--------|
-| **Usuario** | ILE `[Id. usuario]` |
-| **Dia** | `[Posting Date]` |
-| **Producto** | `[Item No.]` (+ Description si existe) |
-| **Cajas** | `SUM(ABS([Quantity]))` |
-| **Kg** | `SUM(ABS([Kilos]))` |
+| Bloque | Contenido |
+|--------|-----------|
+| **Validación ecuación** | Check kg vs check cajas; alertas de integridad |
+| **Resumen por tipo** | ABS(Quantity), lotes, delta Quantity−lotes, % con Kilos=0 |
+| **Type 3 KPI** | Por usuario (`[Id. usuario]`), día (`Posting Date`) y producto (`Item No.`) |
+| **Gráficas** | Volumen por tipo; Type 3 por usuario / día apilado / top productos |
 
-Incluye KPIs, gráficas (por usuario, evolución diaria apilada, top productos) y tablas exportables a Excel.
+Indicadores típicos a vigilar (abril 2026 de referencia):
+
+- Type 3 con `Quantity ≠ 1` (p. ej. Quantity=2) frente a stock 1 lote = 1 caja  
+- Lotes con **venta y ajuste negativo** en el mismo periodo (doble resta en fórmula de cajas)  
+- Type 3 con `[Kilos] = 0` (el check de kg no refleja esos ajustes)
 
 ### Implementacion
 

@@ -48,7 +48,7 @@ def build_document(output_path: Path) -> None:
     meta.alignment = WD_ALIGN_PARAGRAPH.CENTER
     meta.add_run(f"Fecha: {date.today().strftime('%d/%m/%Y')}\n").italic = True
     meta.add_run("Destinatarios: Equipo FOOD / Produccion / Control de gestion\n").italic = True
-    meta.add_run("Estado premisas de negocio: Validadas (referencia marzo 2026)").italic = True
+    meta.add_run("Estado premisas de negocio: Validadas (referencia abril 2026)").italic = True
 
     add_heading(doc, "1. Proposito del desarrollo", 1)
     add_para(
@@ -87,8 +87,9 @@ def build_document(output_path: Path) -> None:
             ["Innova (SQL Server)", "dbo.proc_packs + dbo.proc_materials", "Entradas, salidas, stock/merma por regtime"],
             ["Innova", "dbo.proc_matxacts + dbo.proc_packs", "Kg cajas = consumo TINA; fecha diaria = regtime de la tina (pack = proc_packs.id)"],
             ["Innova", "dbo.vw_stolt", "Arrastre stock sin procesar (fdespesque)"],
-            ["Business Central (Azure SQL)", "bc.[Item Ledger Entry]", "Ventas por lote; campo [Kilos]"],
+            ["Business Central (Azure SQL)", "bc.[Item Ledger Entry]", "Ventas, ajustes +/−, stock E/G; campo [Kilos] / Quantity"],
             ["Business Central", "bc.[Sales Shipment Line]", "Pedido ([Order No.]) del albaran"],
+            ["Business Central", "bc.[Conversion productos]", "Cod. bascula Innova → Cod. producto BC"],
         ],
     )
 
@@ -149,15 +150,31 @@ def build_document(output_path: Path) -> None:
         ],
     )
 
-    add_heading(doc, "6.3 Tablas exportables a Excel", 2)
+    add_heading(doc, "6.3 Pestanas del informe HTML", 2)
+    add_bullets(
+        doc,
+        [
+            "Introduccion, Resumen, Graficas, Detalle diario, Balance (stock/merma)",
+            "Cruce BC por lote (number = Lot No.)",
+            "Balance BC E/G en kg (sin detalle por lote en HTML)",
+            "Balance por tipo en cajas: Inicial + Type 2 − Type 1 − Type 3",
+            "Stock inicial / Stock final BC E/G por producto",
+            "Analisis ILE (1/2/3): validacion de ecuacion y Type 3 por usuario/dia/producto",
+            "Materiales y Debug (SQL)",
+            "Pie unico: nota VAP + nota ajustes negativos Type 3",
+        ],
+    )
+
+    add_heading(doc, "6.4 Tablas exportables a Excel", 2)
     add_bullets(
         doc,
         [
             "Detalle diario de produccion",
             "Entradas, salidas, stock y merma",
             "Cruce Innova / BC por lote (number / Lot No.)",
+            "Balances BC E/G (kg y cajas) y analisis ILE",
             "Top 15 materiales de entrada y de salida",
-            "Exportacion global en un unico .xlsx (5 hojas)",
+            "Exportacion global en un unico libro Excel",
         ],
     )
 
@@ -176,24 +193,25 @@ def build_document(output_path: Path) -> None:
         ],
     )
 
-    add_heading(doc, "8. Valores de referencia — marzo 2026", 1)
+    add_heading(doc, "8. Valores de referencia — abril 2026", 1)
     add_para(
         doc,
-        "Totales obtenidos con las premisas validadas. Sirven como control al regenerar informes.",
+        "Totales obtenidos con las premisas validadas (ultima referencia operativa). "
+        "Sirven como control al regenerar informes.",
     )
     add_table(
         doc,
         ["Metrica", "Valor"],
         [
-            ["Entradas", "665.081,58 kg"],
-            ["Salidas", "492.968,78 kg"],
-            ["Stock (entrada)", "235.462,58 kg"],
-            ["Merma (entrada)", "429.619,00 kg"],
-            ["Cajas", "424.729,00 kg"],
-            ["Balance E-S", "172.112,80 kg"],
-            ["Lotes salida Innova / enlazados BC", "80.737 / 69.775 (86,42 %)"],
-            ["Kg Innova enlazado / Kg BC (ILE)", "422.510,84 / 423.208,70 kg"],
-            ["Diferencia kg enlazados (I−BC)", "−697,86 kg"],
+            ["Entradas TINA", "518.532,75 kg"],
+            ["TINA procesada", "353.246,00 kg"],
+            ["Salidas CAJA", "410.802,15 kg · 71.174 cajas"],
+            ["Stock de tinas", "169.158,75 kg"],
+            ["Merma", "−61.428,15 kg (−11,85 %)"],
+            ["Cruce BC lotes", "66.384 / 71.174 (93,27 %)"],
+            ["Balance BC E/G (check kg)", "−70,56 kg"],
+            ["Balance cajas", "Ini 6.829 · Ent 74.352 · Ven 73.320 · Adj− 3.884 · Check −228"],
+            ["Analisis Type 3", "3 usuarios · top ACZ · muchos Type 3 con Kilos=0"],
         ],
     )
 
@@ -202,7 +220,7 @@ def build_document(output_path: Path) -> None:
     p = doc.add_paragraph()
     p.style = "Intense Quote"
     p.add_run(
-        "python generar_reporte_biomasa.py --start 01/03/2026 --end 31/03/2026"
+        "python generar_reporte_biomasa.py --start 01/04/2026 --end 30/04/2026"
     )
     add_para(doc, "Salida:", bold=True)
     add_bullets(
