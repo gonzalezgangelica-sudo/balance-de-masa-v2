@@ -1,64 +1,44 @@
-# Contrato mínimo — API AL custom ILE (Business Central)
+# Recomendación técnica — API BC para biomasa (evitar errores)
 
-Destino correcto para el informe de biomasa. La API estándar v2.0 `itemLedgerEntries` **no** expone `Lot No.` ni `Location Code`, por lo que no sirve para almacenes E/G ni cruce por lote.
+**Estado:** recomendación documentada en el proyecto. **No es una petición enviada a IT** ni un pendiente operativo. El informe **ya funciona** con ODataV4 + Innova.
 
-Hasta que BT Cloud / el equipo AL publique esta API, el informe usa **ODataV4 `ItemLedgerEntries`** (sí trae lote y almacén) + enriquecimiento Innova (`prday` / `weight`). Ese puente es temporal.
+## Por qué existe este documento
 
-## Publisher / ruta propuesta
+Sirve para **no cometer el error** de basar el balance E/G en la API estándar v2.0 de Business Central.
 
-```
-/api/stolt/biomasa/v1.0/companies({companyId})/itemLedgerEntries
-```
+| Opción | ¿Sirve para biomasa E/G? | Motivo |
+|--------|--------------------------|--------|
+| API v2.0 `itemLedgerEntries` | **No** | No expone `Lot No.` ni `Location Code` |
+| ODataV4 `ItemLedgerEntries` | **Sí (actual)** | Trae lote y almacén; kilos/`prday` desde Innova |
+| API AL custom (futuro) | **Sí (ideal)** | Podría incluir `Id. usuario`, Kilos, Fecha empaque |
 
-Variables de entorno esperadas:
+Si alguien “migra a API v2.0” sin lote/almacén, el cruce y el balance E/G **dejarían de ser fiables**.
 
-| Variable | Ejemplo |
-|----------|---------|
-| `BC_API_PUBLISHER` | `stolt` |
-| `BC_API_GROUP` | `biomasa` |
-| `BC_API_VERSION` | `v1.0` |
-| `BC_API_ENTITY` | `itemLedgerEntries` |
+## Qué usa el informe hoy
 
-## Campos obligatorios por movimiento
+1. Intenta API AL custom (`BC_API_PUBLISHER` / `GROUP` / `VERSION`) **si está publicada**.
+2. Si no, **ODataV4** automáticamente.
+3. Enriquece cada lote con Innova (`prday`, `weight`).
 
-| Campo API (camelCase) | Origen BC | Uso informe |
-|----------------------|-----------|-------------|
-| `entryNumber` | Entry No. | Idempotencia / trazas |
-| `entryType` | Entry Type (1=Sale, 2=Pos.Adj, 3=Neg.Adj) | Balance cajas / análisis |
-| `postingDate` | Posting Date | Ventas / ajustes del día |
-| `locationCode` | Location Code | Filtro **E** y **G** |
-| `lotNumber` | Lot No. | Cruce con Innova `proc_packs.number` |
-| `itemNumber` | Item No. | Balance por producto |
-| `description` | Description | Etiquetas |
-| `quantity` | Quantity | Cajas (ABS) |
-| `documentNumber` | Document No. | Cruce pedido (opcional) |
-| `idUsuario` | **Id. usuario** (custom ILE) | Análisis Type 3 por usuario |
+No hace falta ninguna acción de IT para operar el reporte.
 
-## Campos recomendados (si se publican en la API)
+## Si en el futuro se publica una API AL (opcional)
 
-| Campo API | Origen BC | Nota |
-|-----------|-----------|------|
-| `kilos` | Kilos (custom) | Si falta → Innova `SUM(weight)` por lote |
-| `fechaEmpaque` | Fecha empaque (custom) | Si falta → Innova `MIN(prday)` por lote |
+Campos útiles (referencia, no requisito actual):
 
-Con la premisa híbrida, `kilos` y `fechaEmpaque` pueden omitirse en la API; el informe los rellena desde Innova.
+| Campo API | Uso |
+|-----------|-----|
+| `lotNumber`, `locationCode` (E/G) | Obligatorios para no romper el modelo |
+| `entryType`, `postingDate`, `quantity`, `itemNumber` | Balance / análisis |
+| `idUsuario` | Análisis Type 3 por usuario (hoy OData no lo trae → `(sin usuario)`) |
+| `kilos`, `fechaEmpaque` | Opcionales; si faltan, Innova los cubre |
 
-## Filtros que debe soportar
+Ruta orientativa: `/api/stolt/biomasa/v1.0/companies({id})/itemLedgerEntries`
 
-- `$filter` por `postingDate` (rango inclusive)
-- `$filter` por `locationCode in ('E','G')` o equivalente
-- `$filter` por `entryType in (1,2,3)` (opcional)
-- Paginación OData (`@odata.nextLink` / `$skiptoken`)
+Variables ya previstas en `.env.example`: `BC_API_PUBLISHER`, `BC_API_GROUP`, `BC_API_VERSION`, `BC_API_ENTITY`.
 
-## Entidades auxiliares (fase 2)
+## Resumen
 
-1. **Conversion productos** (`codBascula` → `codProducto`) — hoy solo en SQL BC.
-2. **Sales shipment → Order No.** — cruce “con/sin pedido”; sin ella el cruce API marca salidas sin pedido.
-
-## Criterio de aceptación
-
-1. App registration `CLIENT_ID` con permiso a la API.
-2. Probe: `GET .../itemLedgerEntries?$top=1` devuelve lote + almacén E/G.
-3. Abril de referencia: check kg y cajas alineados con la vía SQL (tolerancia acordada).
-
-Contacto: solicitar creación del page/API AL al equipo BT Cloud / DevOps BC.
+- **Guardar** esta nota para evitar errores de diseño.  
+- **No** tratarla como ticket abierto ni como envío a BT Cloud.  
+- Operación diaria: OData + Innova es la vía válida y documentada.

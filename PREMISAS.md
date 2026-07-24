@@ -431,7 +431,7 @@ Objetivo: si BC se consume por **API** (sin campos custom `[Fecha empaque]` / `[
 
 **Validacion:** script `contrastar_lote_innova_bc.py` compara por lote `prday`/`weight` vs `[Fecha empaque]`/`[Kilos]` (mes de referencia). Resultados en `Reports/contraste_lote_innova_bc_*.md`.
 
-**Estado (implementado):** `BC_SOURCE=api` (o `--bc-source api`) usa OAuth + **API AL custom** si esta publicada; si no, **ODataV4 `ItemLedgerEntries`** (tiene lote y almacén E/G) + enrich Innova. Contrato AL para BT Cloud: `docs/BC_API_AL_CONTRACT.md`. `BC_SOURCE=sql` mantiene la vía Azure SQL. La API estándar v2.0 no sirve (sin Lot/Location). Sin API custom, `[Id. usuario]` no está en OData → análisis Type 3 agrupa como `(sin usuario)`.
+**Estado (implementado):** `BC_SOURCE=api` usa OAuth + ODataV4 (o API AL custom *si* existiera) + enrich Innova. La API estándar v2.0 **no** sirve (sin Lot/Location): ver recomendación `docs/BC_API_AL_CONTRACT.md` (no es una petición enviada a IT). `BC_SOURCE=sql` mantiene Azure SQL. Sin campo usuario en OData → análisis Type 3 como `(sin usuario)`.
 
 ### SQL Innova — lotes de salida con codigo (lado enlace)
 

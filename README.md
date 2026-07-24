@@ -9,7 +9,7 @@ Fuente BC recomendada: **`BC_SOURCE=api`** (API AL custom cuando exista; puente 
 |-----------|-----------|
 | **[INSTRUCCIONES.md](INSTRUCCIONES.md)** | Manual de uso, arquitectura y checklist de cierre |
 | **[PREMISAS.md](PREMISAS.md)** | Reglas de negocio canónicas |
-| **[docs/BC_API_AL_CONTRACT.md](docs/BC_API_AL_CONTRACT.md)** | Contrato API AL para IT / BT Cloud |
+| **[docs/BC_API_AL_CONTRACT.md](docs/BC_API_AL_CONTRACT.md)** | Recomendación: no usar API v2.0 sin lote/almacén (evitar errores) |
 | `docs/CREDENCIALES_LOCAL.md` | Secretos locales (**no versionado**) |
 
 ---

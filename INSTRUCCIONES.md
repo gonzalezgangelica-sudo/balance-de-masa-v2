@@ -2,7 +2,7 @@
 
 Guía de uso y funcionamiento del informe de biomasa (**Stolt Sea Farm**).  
 Reglas de negocio canónicas: [PREMISAS.md](PREMISAS.md).  
-Contrato API BC: [docs/BC_API_AL_CONTRACT.md](docs/BC_API_AL_CONTRACT.md).  
+Recomendación API BC (evitar errores): [docs/BC_API_AL_CONTRACT.md](docs/BC_API_AL_CONTRACT.md).  
 Credenciales locales (no versionadas): `docs/CREDENCIALES_LOCAL.md`.
 
 ---
@@ -223,8 +223,8 @@ flowchart LR
 - [x] Balance stock alineado kg/cajas
 - [x] Pestaña auditoría movimientos ILE
 - [x] Usuarios SQL solo-lectura (`biomasa_ro`, `AEV`, …)
-- [x] Documentación: PREMISAS, README, este fichero, contrato API AL
-- [ ] Publicar API AL custom en BC (IT) — pendiente opcional; OData sirve de puente
+- [x] Documentación: PREMISAS, README, este fichero, recomendación API BC
+- [x] Vía operativa BC: ODataV4 + Innova (API AL custom solo si aparece en el futuro)
 - [ ] Rotar `sa` / secretos de App Registration en producción según política IT
 
 ---
@@ -232,5 +232,5 @@ flowchart LR
 ## 10. Contacto técnico
 
 - Reglas de negocio: actualizar **PREMISAS.md** y constantes `PREMISA_*` / `SQL_*` en código.  
-- API AL BC: equipo BT Cloud / DevOps BC ([contrato](docs/BC_API_AL_CONTRACT.md)).  
+- API BC: no usar v2.0 sin lote/almacén; ver recomendación [docs/BC_API_AL_CONTRACT.md](docs/BC_API_AL_CONTRACT.md).  
 - Usuarios Innova: DBA con script en `scripts/`.
