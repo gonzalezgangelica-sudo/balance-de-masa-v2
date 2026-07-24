@@ -24,9 +24,9 @@ Documento canonico del proyecto **CALCULO_BIOMASA**. Cualquier cambio en reglas 
 | 5 | **Merma** — balance: Entradas TINA − Salidas CAJA − Stock de tinas | Confirmada (implementada) |
 | 6 | **Cruce BC / pedidos** — enlace por lote; ventas ILE; pedido desde albaran | Confirmada (implementada) |
 | 7 | Stock inventario / arrastre | Pendiente |
-| 8 | **Balance BC E/G** — stock kg, cajas (Type 2/1/3), stock ini/fin por producto, analisis ILE | Confirmada (implementada) |
+| 8 | **Balance BC E/G** — stock kg/cajas (empaque/1ª salida), auditoría movimientos ILE, análisis Type 1/2/3 | Confirmada (implementada) |
 
-> Las reglas anteriores basadas en `regtime`, filtro `%tina%` en nombre de material, o totales de marzo 2026 con logica legacy **quedan sustituidas** por las premisas de esta seccion.
+> Proyecto operativo / cerrado documentalmente: ver **INSTRUCCIONES.md** (checklist de cierre). Premisa 7 (arrastre inventario) sigue pendiente de negocio.
 
 ---
 
@@ -431,7 +431,7 @@ Objetivo: si BC se consume por **API** (sin campos custom `[Fecha empaque]` / `[
 
 **Validacion:** script `contrastar_lote_innova_bc.py` compara por lote `prday`/`weight` vs `[Fecha empaque]`/`[Kilos]` (mes de referencia). Resultados en `Reports/contraste_lote_innova_bc_*.md`.
 
-**Estado:** documentado y contrastable; el informe principal **sigue** usando campos BC SQL hasta decidir el corte a API/hibrido.
+**Estado (implementado):** `BC_SOURCE=api` (o `--bc-source api`) usa OAuth + **API AL custom** si esta publicada; si no, **ODataV4 `ItemLedgerEntries`** (tiene lote y almacén E/G) + enrich Innova. Contrato AL para BT Cloud: `docs/BC_API_AL_CONTRACT.md`. `BC_SOURCE=sql` mantiene la vía Azure SQL. La API estándar v2.0 no sirve (sin Lot/Location). Sin API custom, `[Id. usuario]` no está en OData → análisis Type 3 agrupa como `(sin usuario)`.
 
 ### SQL Innova — lotes de salida con codigo (lado enlace)
 
@@ -566,7 +566,7 @@ Balance de masa en Business Central para **Location Code E y G** unicamente.
 | **Encadenamiento** | Stock final del dia N = stock inicial del dia N+1 |
 | **Salidas Innova** | Salidas CAJA del dia (`proc_packs`, premisa 3) |
 | **Ventas BC** | ILE `[Entry Type] = 1`, `[Posting Date]` del dia, almacenes E/G |
-| **Ajustes negativos** | ILE `[Entry Type] = 3`: marcan **salida del lote** en stock inicial/real (junto con Type 1). En **kg** no restan como flujo aparte. En **cajas** sí restan: Inicial + Entradas (Type 2) − Ventas (Type 1) − Ajustes neg. (Type 3) |
+| **Ajustes negativos** | ILE `[Entry Type] = 3`: con Type 1 definen la **primera salida** del lote. Kg y cajas cuentan esa salida **una vez** (no restan `ABS(Quantity)` aparte) |
 | **Stock apertura** | Empaque anterior al periodo sin venta previa en E/G |
 | **Check** | Stock final teorico − Stock final real |
 | **Alcance check** | Solo lotes con empaque o movimiento ILE en el mes del periodo |
@@ -587,7 +587,8 @@ La tabla del informe incluye **todos los dias del mes** (laborables y fines de s
 | Nivel | Clave | Campos |
 |-------|-------|--------|
 | **Tipo producto** | `bc.[Conversion productos].[Cod. producto]` | Enlace: Innova `material` = `Cod. bascula`; fallback `pattern` / `[Item No.]` |
-| **Balance por tipo (cajas)** | Por Cod. producto / `[Item No.]` | Stock inicial / **Entradas BC (ajustes +)** / **Ventas BC** / **Ajustes neg.** / Stock teorico / Stock real / Check en **nº de cajas** |
+| **Balance por tipo (cajas)** | Por Cod. producto / `[Item No.]` | Stock = empaque / 1ª salida (1 lote = 1 caja) |
+| **Movimientos ILE (auditoría)** | Por Cod. producto | `Inicial + Type 2 − Type 1 − Type 3` con `ABS(Quantity)` y `ABS(Kilos)`; check puede ≠ 0 |
 | **Item BC** | `[Item No.]` / `[Description]` en ILE | Coincide con `Cod. producto` cuando hay conversion |
 
 **Enlace producto Innova ↔ BC:**
@@ -600,12 +601,10 @@ La tabla del informe incluye **todos los dias del mes** (laborables y fines de s
 
 **Unidades en cajas (pestaña Balance por tipo):**
 
-- **Entradas BC** = ajustes positivos ILE (`[Entry Type] = 2`, almacenes E/G): `SUM(ABS([Quantity]))` por `[Item No.]` / Cod. producto.
-- **Ventas BC** = ventas ILE (`[Entry Type] = 1`, almacenes E/G): `SUM(ABS([Quantity]))` por `[Item No.]` / Cod. producto.
-- **Ajustes negativos** = ILE (`[Entry Type] = 3`, almacenes E/G): `SUM(ABS([Quantity]))` por `[Item No.]` / Cod. producto.
-- **Stock teorico** = Stock inicial + Entradas − Ventas − Ajustes negativos.
-- Stock inicial dia 1 = lotes ILE en stock al inicio (empaque anterior; salida Type 1/3 ese dia o despues); 1 lote = 1 caja.
-- Stock final real = lotes ILE en stock al cierre (incluye arrastre de dias anteriores); 1 lote = 1 caja.
+- **Entradas (empaque)** = lotes con fecha de empaque en el periodo (**1 lote = 1 caja**).
+- **Salidas** = lotes con **primera salida** en el periodo (Type 1 o Type 3; una sola vez).
+- **Ajustes negativos** = movimientos ILE Type 3 (columna informativa).
+- **Stock teorico** = Stock inicial + Empaque − Salidas (misma linea de vida que el stock real / check kg).
 - **Encadenamiento:** stock final teorico dia N = stock inicial dia N+1.
 - Check = teorico − real.
 
@@ -620,9 +619,9 @@ Almacenes **E** y **G**. Agregado por Cod. producto / `[Item No.]` en **cajas** 
 
 Ejemplo abril 2026: stock inicial al **01/04/2026**; stock final = empaque en abril aún sin vender al **30/04/2026** (queda pendiente para mayo).
 
-### Acceso multi-usuario Innova (planificado)
+### Acceso multi-usuario Innova
 
-Sin cambio de codigo en este repositorio: IT debe crear usuarios SQL (o grupo AD) individuales con solo lectura; cada puesto ya puede guardar su `DB_USER`/`DB_PASSWORD` con `configurar_credenciales.bat`. Ver README.
+Login SQL solo-lectura para el informe: script `scripts/crear_usuario_innova_biomasa.py` (usuario por defecto `biomasa_ro`, rol `db_datareader`). Cada puesto guarda su `DB_USER`/`DB_PASSWORD` en `.env`. Ver README.
 
 En la pestaña **Balance BC E/G** el desglose es por **tipo de producto** (sin tabla de detalle por lote, para mantener el informe ligero). La nota de ajustes negativos Type 3 aparece **una sola vez** al pie global del informe.
 
@@ -632,16 +631,16 @@ Validación de movimientos ILE en almacenes **E/G** (`Entry Type` 1 = venta, 2 =
 
 | Bloque | Contenido |
 |--------|-----------|
-| **Validación ecuación** | Check kg vs check cajas; alertas de integridad |
+| **Validación ecuación** | Check kg vs check cajas (misma lógica; cajas en lotes) |
 | **Resumen por tipo** | ABS(Quantity), lotes, delta Quantity−lotes, % con Kilos=0 |
 | **Type 3 KPI** | Por usuario (`[Id. usuario]`), día (`Posting Date`) y producto (`Item No.`) |
 | **Gráficas** | Volumen por tipo; Type 3 por usuario / día apilado / top productos |
 
 Indicadores típicos a vigilar (abril 2026 de referencia):
 
-- Type 3 con `Quantity ≠ 1` (p. ej. Quantity=2) frente a stock 1 lote = 1 caja  
-- Lotes con **venta y ajuste negativo** en el mismo periodo (doble resta en fórmula de cajas)  
-- Type 3 con `[Kilos] = 0` (el check de kg no refleja esos ajustes)
+- Type 3 con `Quantity ≠ 1` — el balance de cajas ya cuenta lotes; el delta Quantity−lotes queda en análisis ILE  
+- Lotes con **venta y ajuste negativo** — stock real saca el lote una vez; Type 3 no resta en el teórico  
+- Type 3 con `[Kilos] = 0` — coherente con no restarlos como flujo en kg ni en cajas  
 
 ### Implementacion
 

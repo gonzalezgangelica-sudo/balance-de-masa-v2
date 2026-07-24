@@ -20,3 +20,9 @@ logs/*.log
 
 # IDE
 .vscode/
+
+# Credenciales locales (nunca versionar)
+.env
+CREDENCIALES*.md
+docs/CREDENCIALES*.md
+**/CREDENCIALES_LOCAL.md

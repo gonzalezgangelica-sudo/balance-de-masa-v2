@@ -1,10 +1,16 @@
 # CALCULO_BIOMASA
 
-Informe de biomasa de planta (**Stolt Sea Farm**): consolida **Innova** (SQL Server) y **Business Central** (Azure SQL) en un HTML interactivo con KPIs, gráficas, tablas exportables a Excel y balance ERP por producto (sin detalle por lote en el HTML, para mantenerlo ligero).
+Informe de biomasa de planta (**Stolt Sea Farm**): consolida **Innova** (SQL Server) y **Business Central** (API OAuth / OData, o Azure SQL) en un HTML interactivo con KPIs, gráficas, tablas exportables a Excel y balance ERP por producto (sin detalle por lote en el HTML, para mantenerlo ligero).
 
-**Estado:** proyecto finalizado y validado (marzo–abril 2026). Última referencia operativa: **abril 2026**.
+**Estado:** proyecto **cerrado / operativo** (referencia validada: **abril 2026**).  
+Fuente BC recomendada: **`BC_SOURCE=api`** (API AL custom cuando exista; puente ODataV4 + enrich Innova).
 
-Documento canónico de reglas: **[PREMISAS.md](PREMISAS.md)**.
+| Documento | Contenido |
+|-----------|-----------|
+| **[INSTRUCCIONES.md](INSTRUCCIONES.md)** | Manual de uso, arquitectura y checklist de cierre |
+| **[PREMISAS.md](PREMISAS.md)** | Reglas de negocio canónicas |
+| **[docs/BC_API_AL_CONTRACT.md](docs/BC_API_AL_CONTRACT.md)** | Contrato API AL para IT / BT Cloud |
+| `docs/CREDENCIALES_LOCAL.md` | Secretos locales (**no versionado**) |
 
 ---
 
@@ -80,10 +86,12 @@ Al terminar bien, abre el HTML más reciente de `Reports\`.
 
 | Dónde | Qué guarda |
 |-------|------------|
-| `.env` en la carpeta del proyecto | Servidores, usuarios y passwords (**no se versiona**) |
+| `.env` en la carpeta del proyecto | Innova SQL; BC API (`CLIENT_ID`/`TENANT_ID`/`CLIENT_SECRET`, `BC_SOURCE=api`) y/o BC SQL (`BC_SERVER`…) |
 
 El informe solo lee `.env`. Para cambiar passwords: editar `.env` a mano.  
 Plantilla sin secretos: `.env.example`. La opción 2 del menú crea `.env` desde la plantilla y lo abre en el Bloc de notas.
+
+Con `BC_SOURCE=api` no hace falta la réplica Azure SQL para el ILE (sí puede usarse opcionalmente para `Conversion productos`). La API estándar v2.0 no incluye lote/almacén; el cliente usa la API AL custom si está publicada, si no ODataV4.
 
 ### 5. Problemas frecuentes
 
@@ -99,18 +107,20 @@ Plantilla sin secretos: `.env.example`. La opción 2 del menú crea `.env` desde
 
 ---
 
-### Acceso multi-usuario Innova (planificado — sin cambio de codigo)
+### Acceso multi-usuario Innova
 
-Objetivo: que cada usuario use **su propio** login a Innova, no un usuario compartido (`sa` / servicio).
+Cada puesto usa su propio `DB_USER` / `DB_PASSWORD` en `.env` (no compartir `sa`).
 
-| Quien | Accion futura |
-|-------|----------------|
-| **DBA / IT** | Crear login SQL por persona (o grupo AD) con `SELECT` solo sobre tablas del informe |
-| **Opcional** | Autenticacion Windows (`Trusted_Connection`) para no guardar password SQL |
-| **Cada usuario** | Ya disponible: `configurar_credenciales.bat` guarda `DB_USER`/`DB_PASSWORD` en su perfil |
-| **Despliegue** | No distribuir `.env` con secretos compartidos |
+| Quien | Accion |
+|-------|--------|
+| **DBA / IT** | Crear login SQL solo-lectura: `python scripts/crear_usuario_innova_biomasa.py --update-env` (script SQL en `scripts/crear_usuario_innova_biomasa.sql`) |
+| **Permisos** | `db_datareader` sobre `Innova` + DENY escritura en `dbo` (`proc_packs`, `proc_materials`, `proc_matxacts`, `vw_stolt`) |
+| **Usuario app** | Por defecto `biomasa_ro` (solo lectura); por persona p.ej. `AEV` |
+| **Cada usuario** | `configurar_credenciales.bat` / editar `.env` |
+| **Despliegue** | No distribuir `.env` con secretos |
+| **Credenciales locales** | Documento `docs/CREDENCIALES_LOCAL.md` (gitignored) — informe + modo diseño/DBA |
 
-Estado actual: el mecanismo de credenciales **por puesto** ya existe; falta el alta de usuarios individuales en el servidor Innova (fuera de este repositorio).
+Opcional futuro: autenticacion Windows (`Trusted_Connection`) para no guardar password SQL.
 
 ---
 
@@ -130,15 +140,18 @@ Estado actual: el mecanismo de credenciales **por puesto** ya existe; falta el a
 4. **Detalle diario** — tabla día a día  
 5. **Balance** — entradas, salidas, stock y merma  
 6. **Cruce BC** — Innova ↔ ILE por lote (`number` = `[Lot No.]`)  
-7. **Balance BC E/G** — stock diario almacenes E/G (kg) + resumen por tipo de producto  
-8. **Balance por tipo (cajas)** — Inicial + Type 2 − Type 1 − Type 3  
-9. **Stock inicial BC E/G** — cajas y kg por tipo a la fecha de inicio  
-10. **Stock final BC E/G** — empaque del periodo pendiente de venta a la fecha de fin  
-11. **Análisis ILE (1/2/3)** — validación de ecuación kg/cajas; Type 1/2/3 por usuario/día/producto  
-12. **Materiales** — top entradas / salidas  
-13. **Debug** — trazas SQL (opcional)
+7. **Balance BC E/G** — stock diario almacenes E/G (kg)  
+8. **Balance por tipo (cajas)** — stock: Inicial + Empaque − Primera salida (1 lote = 1 caja)  
+9. **Movimientos ILE (T2/1/3)** — auditoría `ABS(Quantity)` / `ABS(Kilos)`  
+10. **Stock inicial BC E/G** — cajas y kg por tipo a la fecha de inicio  
+11. **Stock final BC E/G** — empaque del periodo pendiente de venta a la fecha de fin  
+12. **Análisis ILE (1/2/3)** — Type 1/2/3 por usuario/día/producto  
+13. **Materiales** — top entradas / salidas  
+14. **Debug** — trazas SQL (opcional)
 
 Al pie del informe (una sola vez): nota VAP + nota de ajustes negativos Type 3.
+
+Manual completo: **[INSTRUCCIONES.md](INSTRUCCIONES.md)**.
 
 ---
 
