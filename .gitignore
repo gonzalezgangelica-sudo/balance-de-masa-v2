@@ -26,3 +26,8 @@ logs/*.log
 CREDENCIALES*.md
 docs/CREDENCIALES*.md
 **/CREDENCIALES_LOCAL.md
+
+# Salidas / temporales locales
+output/
+~$*
+
