@@ -630,6 +630,8 @@ La tabla del informe incluye **todos los dias del mes** (laborables y fines de s
 | **Cod. producto (Conversion)** | `bc.[Conversion productos].[Cod. producto]` — no sobrescribe Item No. del lote |
 | **Pattern Innova** | `proc_materials.pattern` — respaldo si no hay Item No. ni Conversion |
 
+> **2026-08-05:** el desglose por producto de stock E/G prioriza `[Item No.]` del lote (no Conversion). Detalle en [docs/CAMBIOS_LOCAL.md](docs/CAMBIOS_LOCAL.md).
+
 **Unidades en cajas (pestaña Balance por tipo):**
 
 - **Producción (Salidas CAJA)** = lotes coincidentes Innova ∩ BC con fecha de producción en el periodo (**1 lote = 1 caja**).

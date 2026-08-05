@@ -160,6 +160,8 @@ flowchart LR
      - **Producción (Salidas CAJA)** = alta de stock E/G por **coincidencia de lote** Innova CAJA ∩ BC ILE
        (`proc_packs.number` = `Lot No.`; `prday` = `Fecha empaque`). 1 lote = 1 caja. **No** es salida de almacén BC.
      - **Merma peso (Innova − BC)** = desvío de báscula; no entra en el check de stock.
+   - **Producto (stock inicial/final y balance por tipo):** prioridad **`Item No.`** del lote en ILE;
+     `Conversion productos` solo si el lote no trae Item No. (evita etiquetas distintas entre stock inicial y final).
    - **Movimientos ILE (auditoría):** Inicial + Type2 − Type1 − Type3 con `ABS(Quantity)` / `ABS(Kilos)` → el check puede ≠ 0.
 
 ### Módulos principales
@@ -214,6 +216,7 @@ flowchart LR
 | Error login Innova | Revisar `DB_*` en `.env`; VPN/red |
 | Error OAuth / BC API | Revisar `CLIENT_*`, `TENANT_ID`, `COMPANY_ID` |
 | Timeout BC SQL | Subir `BC_TIMEOUT` o usar `BC_SOURCE=api` |
+| Stock final con productos “cambiados” vs inicial | Regenerar con build ≥ 2026-08-05: el código usa **Item No. ILE**, no Conversion. Ver [docs/CAMBIOS_LOCAL.md](docs/CAMBIOS_LOCAL.md) |
 | Check cajas ≠ 0 en Movimientos ILE | Normal (Quantity≠1, Type 1+3, Kilos=0) |
 | Check stock = 0 pero Movimientos ≠ 0 | Correcto: son lógicas distintas |
 | Sin HTML | Mirar `Reports\` o `logs\` |

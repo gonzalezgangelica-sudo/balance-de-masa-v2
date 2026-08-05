@@ -9,6 +9,7 @@ Fuente BC recomendada: **`BC_SOURCE=api`** (API AL custom cuando exista; puente 
 |-----------|-----------|
 | **[INSTRUCCIONES.md](INSTRUCCIONES.md)** | Manual de uso, arquitectura y checklist de cierre |
 | **[PREMISAS.md](PREMISAS.md)** | Reglas de negocio canónicas |
+| **[docs/CAMBIOS_LOCAL.md](docs/CAMBIOS_LOCAL.md)** | Historial de cambios guardados en local |
 | **[docs/BC_API_AL_CONTRACT.md](docs/BC_API_AL_CONTRACT.md)** | Recomendación: no usar API v2.0 sin lote/almacén (evitar errores) |
 | `docs/CREDENCIALES_LOCAL.md` | Secretos locales (**no versionado**) |
 
@@ -224,7 +225,7 @@ Almacenes **E/G**. Histórico ILE desde **2026-01-01**. Encadenamiento: cierre d
 | Entradas | Positive Adjmt. · `Entry Type = 2` · `ABS(Quantity)` |
 | Ventas | Sale · `Entry Type = 1` · `ABS(Quantity)` |
 | Ajustes neg. | Negative Adjmt. · `Entry Type = 3` · `ABS(Quantity)` |
-| Producto | `Cod. producto` vía `bc.[Conversion productos]` (`Cod. bascula` = `material` Innova) |
+| Producto | **`Item No.` del lote ILE** (prioridad). Conversion bascula solo si no hay Item No. |
 
 `Stock teórico = Stock inicial + Entradas − Ventas − Ajustes neg.`  
 Stock real = lotes en stock (1 lote = 1 caja). El check de cajas **no es comparable 1:1** con el de kg (fórmulas y unidades distintas).

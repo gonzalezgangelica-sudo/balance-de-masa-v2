@@ -30,4 +30,9 @@ docs/CREDENCIALES*.md
 # Salidas / temporales locales
 output/
 ~$*
+_contraste_*
+_probe_*
+_verify_*
+_stock_final_*
+_modAlbaran*
 
