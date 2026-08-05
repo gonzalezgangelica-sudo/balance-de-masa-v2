@@ -292,7 +292,8 @@ def build_balance_from_ile(
         end=end,
     )
 
-    # Empaque diario: lotes Innova con prday en periodo presentes en ILE E/G
+    # Produccion (Salidas CAJA): lotes Innova con prday en periodo presentes en ILE E/G
+    # (alta stock E/G por coincidencia de lote; no es salida de almacen BC).
     ile_lots = {r["lot"] for r in period_rows if r["lot"]}
     first_out_by_lot: dict[str, dt.date] = {}
     item_by_lot: dict[str, tuple[str, str]] = {}

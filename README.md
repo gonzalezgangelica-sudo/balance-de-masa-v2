@@ -140,11 +140,11 @@ Opcional futuro: autenticacion Windows (`Trusted_Connection`) para no guardar pa
 4. **Detalle diario** — tabla día a día  
 5. **Balance** — entradas, salidas, stock y merma  
 6. **Cruce BC** — Innova ↔ ILE por lote (`number` = `[Lot No.]`)  
-7. **Balance BC E/G** — stock diario almacenes E/G (kg)  
-8. **Balance por tipo (cajas)** — stock: Inicial + Empaque − Primera salida (1 lote = 1 caja)  
+7. **Balance BC E/G** — Inicial + Producción (Salidas CAJA) − 1ª salida; merma peso Innova−BC  
+8. **Balance por tipo (cajas)** — Producción = alta stock por coincidencia lote Innova∩BC (1 lote = 1 caja)  
 9. **Movimientos ILE (T2/1/3)** — auditoría `ABS(Quantity)` / `ABS(Kilos)`  
 10. **Stock inicial BC E/G** — cajas y kg por tipo a la fecha de inicio  
-11. **Stock final BC E/G** — empaque del periodo pendiente de venta a la fecha de fin  
+11. **Stock final BC E/G** — producción del periodo pendiente de venta a la fecha de fin  
 12. **Análisis ILE (1/2/3)** — Type 1/2/3 por usuario/día/producto  
 13. **Materiales** — top entradas / salidas  
 14. **Debug** — trazas SQL (opcional)
@@ -160,7 +160,8 @@ Manual completo: **[INSTRUCCIONES.md](INSTRUCCIONES.md)**.
 | Término | Rol | Innova |
 |---------|-----|--------|
 | **TINA** | Entrada de biomasa | `proc_packs` · `pkpackaging = 3` |
-| **CAJA** | Salida de producto | `proc_packs` · `pkpackaging <> 3` |
+| **CAJA** | Salida de producto (proceso) | `proc_packs` · `pkpackaging <> 3` |
+| **Producción (Salidas CAJA)** | En balance BC E/G: **alta de stock** E/G por coincidencia de lote Innova∩BC | `number`/`prday` = `Lot No.`/`Fecha empaque` |
 | **TINA procesada** | Consumo de tina (no es salida CAJA) | `proc_matxacts` |
 
 Identidad visual: azul navy / cian / rojo logo Stolt Sea Farm.

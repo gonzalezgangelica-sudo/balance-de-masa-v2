@@ -156,7 +156,10 @@ flowchart LR
 2. **BC ILE E/G:** con `BC_SOURCE=api`, descarga movimientos Type 1/2/3 (OAuth), enriquece lote con Innova (`prday`, `weight`).
 3. **Cruce:** `proc_packs.number` = `Lot No.` (almacenes E y G).
 4. **Balances:**
-   - **Stock (oficial):** Inicial + Empaque − Primera salida → check kg/cajas alineados.
+   - **Stock (oficial):** Inicial + Producción (Salidas CAJA) − Primera salida → check kg/cajas alineados.
+     - **Producción (Salidas CAJA)** = alta de stock E/G por **coincidencia de lote** Innova CAJA ∩ BC ILE
+       (`proc_packs.number` = `Lot No.`; `prday` = `Fecha empaque`). 1 lote = 1 caja. **No** es salida de almacén BC.
+     - **Merma peso (Innova − BC)** = desvío de báscula; no entra en el check de stock.
    - **Movimientos ILE (auditoría):** Inicial + Type2 − Type1 − Type3 con `ABS(Quantity)` / `ABS(Kilos)` → el check puede ≠ 0.
 
 ### Módulos principales
@@ -182,8 +185,8 @@ flowchart LR
 | Detalle diario | Tabla día a día + Excel |
 | Balance | Stock tinas, merma, arrastre |
 | Cruce BC | Lotes Innova ↔ BC, con/sin pedido |
-| Balance BC E/G | Stock teórico/real en **kg** (almacenes E/G) |
-| Balance por tipo (cajas) | Stock por producto: empaque / 1ª salida |
+| Balance BC E/G | Stock: Inicial + Producción (Salidas CAJA) − 1ª salida; merma peso Innova−BC |
+| Balance por tipo (cajas) | Misma lógica (1 lote = 1 caja; coincidencia Innova∩BC) |
 | **Movimientos ILE (T2/1/3)** | Auditoría Quantity/Kilos Type 2/1/3 |
 | Stock inicial / final BC | Snapshot por producto |
 | Análisis ILE | KPIs Type 3, gráficos, alertas |
@@ -198,7 +201,7 @@ flowchart LR
 |--|------------------------|---------------------|
 | Pestañas | Balance BC E/G, Balance por tipo (cajas) | Movimientos ILE (T2/1/3) |
 | Unidad | 1 lote = 1 caja / kg del lote | `ABS(Quantity)` / `ABS(Kilos)` |
-| Fórmula | Inicial + Empaque − 1ª salida | Inicial + T2 − T1 − T3 |
+| Fórmula | Inicial + Producción (Salidas CAJA) − 1ª salida | Inicial + T2 − T1 − T3 |
 | Check típico abril | **0** | Cajas **+71** (esperado) |
 | Uso | ¿Cuadra el stock? | ¿Qué apuntes hizo BC? |
 

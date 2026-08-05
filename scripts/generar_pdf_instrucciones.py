@@ -206,7 +206,8 @@ def build_full_pdf(path: Path) -> None:
     )
     pdf.bullet("Cruce: proc_packs.number = Lot No. (almacenes E y G).")
     pdf.bullet(
-        "Stock oficial: Inicial + Empaque − Primera salida (check kg/cajas alineados)."
+        "Stock oficial: Inicial + Produccion (Salidas CAJA) − Primera salida "
+        "(Produccion = alta stock E/G por coincidencia lote Innova∩BC; check kg/cajas alineados)."
     )
     pdf.bullet(
         "Auditoría ILE: Inicial + T2 − T1 − T3 con ABS(Quantity)/ABS(Kilos) (check puede ≠ 0)."
@@ -232,8 +233,8 @@ def build_full_pdf(path: Path) -> None:
             ["Detalle diario", "Tabla + Excel"],
             ["Balance", "Stock tinas, merma"],
             ["Cruce BC", "Lotes Innova ↔ BC"],
-            ["Balance BC E/G", "Stock teórico/real kg"],
-            ["Balance por tipo (cajas)", "Empaque / 1ª salida"],
+            ["Balance BC E/G", "Produccion=alta stock Innova∩BC"],
+            ["Balance por tipo (cajas)", "Produccion (Salidas CAJA) / 1ª salida"],
             ["Movimientos ILE (T2/1/3)", "Auditoría Quantity/Kilos"],
             ["Stock inicial/final BC", "Snapshot por producto"],
             ["Análisis ILE", "Type 3, gráficos, alertas"],
@@ -248,7 +249,7 @@ def build_full_pdf(path: Path) -> None:
         [
             ["Pestañas", "BC E/G + tipo cajas", "Movimientos ILE"],
             ["Unidad", "1 lote = 1 caja / kg lote", "ABS(Quantity/Kilos)"],
-            ["Fórmula", "Ini + Empaque − 1ª salida", "Ini + T2 − T1 − T3"],
+            ["Fórmula", "Ini + Produccion (Salidas CAJA) − 1ª salida", "Ini + T2 − T1 − T3"],
             ["Check abril", "0", "Cajas +71 (esperado)"],
             ["Uso", "¿Cuadra el stock?", "¿Qué apuntes hizo BC?"],
         ],

@@ -156,7 +156,8 @@ def build_document(output_path: Path) -> None:
         [
             "Introduccion, Resumen, Graficas, Detalle diario, Balance (stock/merma)",
             "Cruce BC por lote (number = Lot No.)",
-            "Balance BC E/G en kg (sin detalle por lote en HTML)",
+            "Balance BC E/G: Inicial + Produccion (Salidas CAJA) − Primera salida "
+            "(Produccion = alta stock por coincidencia lote Innova∩BC)",
             "Balance por tipo en cajas: Inicial + Type 2 − Type 1 − Type 3",
             "Stock inicial / Stock final BC E/G por producto",
             "Analisis ILE (1/2/3): validacion de ecuacion y Type 3 por usuario/dia/producto",

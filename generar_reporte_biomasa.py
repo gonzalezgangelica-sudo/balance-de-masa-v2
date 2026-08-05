@@ -689,17 +689,19 @@ def print_console_summary(start: dt.date, end: dt.date, output_path: Path, repor
     if k.get("bc_bal_kg_stock_inicial") is not None:
       print(
           f"Balance BC E/G — Stock inicial: {fmt_num(k['bc_bal_kg_stock_inicial'])} | "
-          f"Salidas Innova: {fmt_num(k['bc_bal_kg_produccion'])} | "
-          f"Ventas: {fmt_num(k['bc_bal_kg_ventas'])} | "
+          f"{LABEL_BC_PRODUCCION}: {fmt_num(k['bc_bal_kg_produccion'])} | "
+          f"Primera salida: {fmt_num(k['bc_bal_kg_ventas'])} | "
           f"Stock teorico: {fmt_num(k['bc_bal_kg_stock_teorico'])} | "
           f"Stock real: {fmt_num(k['bc_bal_kg_stock_real'])} | "
-          f"Check: {fmt_num(k['bc_bal_kg_check'])} kg"
-      )
+          f"Check: {fmt_num(k['bc_bal_kg_check'])} kg | "
+          f"{LABEL_BC_MERMA_PESO}: {fmt_num(k.get('bc_bal_kg_merma_peso', 0))} "
+          f"({fmt_pct(k.get('bc_bal_pct_merma_peso'))})"
+        )
     if k.get("bc_bal_cajas_stock_inicial") is not None:
       adj_neg = int(k.get("bc_bal_cajas_ajustes_neg") or 0)
       print(
           f"Balance por tipo (cajas) — Stock inicial: {int(k['bc_bal_cajas_stock_inicial']):,} | "
-          f"Entradas BC (+): {int(k['bc_bal_cajas_entradas']):,} | "
+          f"{LABEL_BC_PRODUCCION}: {int(k['bc_bal_cajas_entradas']):,} | "
           f"Ventas: {int(k['bc_bal_cajas_ventas']):,} | "
           f"Ajustes neg.: {adj_neg:,} | "
           f"Teorico: {int(k['bc_bal_cajas_stock_teorico']):,} | "
@@ -835,6 +837,15 @@ SQL_BC_LOCATION_EG = "ile.[Location Code] IN ('E', 'G')"
 SQL_BC_ILE_OUTPUT = "ile.[Entry Type] = 4"
 SQL_INNOVA_LOT = "CAST(p.number AS varchar(50))"
 BC_BALANCE_CHECK_TOLERANCE_KG = 5000.0
+# Etiqueta de produccion en balance E/G (= salidas CAJA Innova, premisa 3).
+LABEL_BC_PRODUCCION = "Produccion (Salidas CAJA)"
+LABEL_BC_MERMA_PESO = "Merma peso (Innova - BC)"
+# Definicion canonica (Premisa 8): alta de stock E/G por coincidencia de lote Innova CAJA ∩ BC.
+DEF_BC_PRODUCCION = (
+    "Alta de stock E/G (no es salida de almacen BC): lotes con coincidencia "
+    "Innova CAJA (proc_packs.number / prday) = BC Lot No. en ILE E/G (Fecha empaque). "
+    "1 lote = 1 caja; kg = peso del lote."
+)
 BC_BALANCE_SKIP_APERTURA = True
 # Limite historico ILE para evitar timeout en BC (solo movimientos desde esta fecha).
 BC_ILE_HISTORY_FROM = dt.date(2026, 1, 1)
@@ -856,19 +867,22 @@ PREMISA_BC_BALANCE_EG_REGLAS = (
   "Almacenes BC: Location Code E y G unicamente.",
   "Fecha empaque: campo [Fecha empaque] en Item Ledger Entry.",
   "Stock inicial (dia): ILE — [Fecha empaque] anterior al dia y venta o ajuste negativo (Entry Type 1/3) en ese dia o posteriores.",
-  "Stock final teorico (dia): Stock inicial + Salidas Innova - Ventas del dia.",
-  "Stock final real (dia): empaque acumulado del periodo sin venta hasta ese dia (kg BC por lote).",
-  "Encadenamiento: stock final del dia N = stock inicial del dia N+1 (misma regla ILE).",
-  "Salidas Innova: salidas CAJA del periodo (proc_packs prday, premisa 3).",
-  "Ventas BC: ventas del periodo en almacenes E/G (Posting Date, Entry Type=1).",
-  "Stock apertura: empaque anterior al periodo sin venta antes del periodo (E/G).",
-  "Check (dia): Stock final teorico - Stock final real.",
+  "Stock final teorico (dia): Stock inicial + Produccion (Salidas CAJA) − Primera salida del dia (misma logica en kg y cajas).",
+  "Stock final real (dia): lotes con produccion (empaque) hasta ese dia y sin primera salida hasta ese dia (kg BC por lote; 1 lote = 1 caja).",
+  "Encadenamiento: stock final teorico del dia N = stock inicial del dia N+1.",
+  "Produccion (Salidas CAJA): alta de stock E/G por coincidencia de lote Innova CAJA ∩ BC ILE "
+  "(proc_packs.number = Lot No.; prday = Fecha empaque). 1 lote = 1 caja; kg = peso del lote. "
+  "No es salida de almacen BC ni transferencia.",
+  "Primera salida: primera venta o ajuste negativo (Entry Type 1 o 3) del lote en ese dia.",
+  "Stock apertura: produccion anterior al periodo sin venta antes del periodo (E/G).",
+  "Check (dia): Stock final teorico - Stock final real (debe ser 0 en kg y en cajas por construccion).",
   "Check mes: Stock final teorico fin de mes - Stock final real fin de mes.",
   "Alcance check mensual: solo lotes con empaque o movimiento ILE en el mes del periodo.",
   "Historico ILE acotado desde 2026-01-01 para evitar timeout en BC.",
-  "Fines de semana: sin Salidas Innova ni Ventas BC (0 kg); stocks se arrastran del dia anterior.",
-  "Desglose por tipo de producto BC (Cod. producto via Conversion productos: Cod. bascula = material Innova) y lote.",
-  "Balance por tipo en cajas: misma medida que kg/stock real (1 lote = 1 caja). Teorico = Inicial + Empaque − Primera salida (Type 1 o 3). Columnas ILE Type 2/1/3 son informativas.",
+  "Fines de semana: sin Produccion (Salidas CAJA) ni Primera salida (0); stocks se arrastran del dia anterior.",
+  "Merma peso (Innova - BC): peso Innova enlazado − kilos BC del mismo lote (no afecta el check de stock).",
+  "Desglose por tipo de producto BC: prioridad Item No. del lote ILE; Conversion bascula solo si no hay Item No.",
+  "Balance kg y cajas: misma linea de vida del lote. Teorico = Inicial + Produccion (Salidas CAJA) − Primera salida. Columnas ILE Type 2/1/3 (ABS) son auditoria informativa.",
   "Encadenamiento en cajas: stock final teorico del dia N = stock inicial del dia N+1.",
   "Stock inicial BC E/G por producto: corte a fecha inicio; empaque anterior; venta ese dia o despues; cajas y kg.",
   "Stock final BC E/G por producto: empaque del periodo sin venta/ajuste neg. hasta fecha fin (pendiente mes siguiente); cajas y kg.",
@@ -962,8 +976,9 @@ def build_report_intro_html(
         "<li><strong>Detalle diario</strong> — tabla día a día con exportación Excel.</li>"
         "<li><strong>Balance</strong> — stock de tinas, merma y arrastre mensual.</li>"
         "<li><strong>Cruce BC</strong> — enlace Innova / Business Central por lote.</li>"
-        "<li><strong>Balance BC E/G</strong> — stock inicial, salidas Innova, ventas y check teorico (almacenes E y G).</li>"
-        "<li><strong>Balance por tipo (cajas)</strong> — stock por empaque / primera salida (1 lote = 1 caja).</li>"
+        "<li><strong>Balance BC E/G</strong> — Inicial + Produccion (Salidas CAJA) − Primera salida; "
+        "Produccion = alta stock por coincidencia de lote Innova∩BC; merma peso aparte.</li>"
+        "<li><strong>Balance por tipo (cajas)</strong> — misma logica (1 lote = 1 caja).</li>"
         "<li><strong>Movimientos ILE</strong> — auditoría Type 2/1/3 en cajas y kg (ABS Quantity/Kilos).</li>"
         "<li><strong>Análisis ILE</strong> — validación Type 1/2/3, checks kg/cajas e indicadores.</li>"
         "<li><strong>Materiales</strong> — top entradas y salidas.</li>"
@@ -1143,12 +1158,15 @@ def resolve_cod_producto_bc(
 ) -> tuple[str, str, str]:
     """Devuelve (cod_producto, origen_enlace, descripcion_conversion).
 
-    Prioridad:
-      1) bc.Conversion productos: Cod. bascula = material Innova → Cod. producto
-      2) Innova pattern si existe como Cod. producto en Conversion
-      3) Item No. BC del lote
+    Prioridad (stock/balance E/G = producto del almacén BC):
+      1) Item No. BC del lote (ILE) — misma fuente que stock inicial
+      2) bc.Conversion productos: Cod. bascula = material Innova → Cod. producto
+      3) Innova pattern si existe como Cod. producto en Conversion
       4) pattern Innova
       5) material Innova
+
+    Conversion sigue como respaldo cuando el lote no trae Item No.; no debe
+    sobrescribir el SKU real del movimiento ILE (evita descuadres stock final).
     """
     material = (material or "").strip()
     pattern = (pattern or "").strip()
@@ -1159,6 +1177,9 @@ def resolve_cod_producto_bc(
         for meta in conv_map.values()
         if meta.get("cod_producto")
     }
+
+    if item_no:
+        return item_no, "item_no_bc", ""
 
     if material:
         meta = conv_map.get(material)
@@ -1173,9 +1194,6 @@ def resolve_cod_producto_bc(
 
     if pattern and pattern in productos:
         return pattern, "pattern_en_conversion", ""
-
-    if item_no:
-        return item_no, "item_no_bc", ""
 
     if pattern:
         return pattern, "pattern_innova", ""
@@ -2097,23 +2115,136 @@ def compute_bc_stock_real_cierre(
     lot_snapshot: list[dict[str, Any]],
     day: dt.date,
 ) -> float:
+    """Suma kg de lotes en stock al cierre del dia (empaque <= dia, sin primera salida <= dia)."""
     total = 0.0
     for row in lot_snapshot:
-        fe_empaque = row.get("fe_empaque")
-        if fe_empaque is None:
-            continue
-        if isinstance(fe_empaque, dt.datetime):
-            fe_empaque = fe_empaque.date()
-        if fe_empaque > day:
-            continue
-        first_sale = row.get("first_sale")
-        if first_sale is not None:
-            if isinstance(first_sale, dt.datetime):
-                first_sale = first_sale.date()
-            if first_sale <= day:
-                continue
-        total += to_float(row.get("kg"))
+        fe = row.get("fe_empaque")
+        out = row.get("first_sale")
+        if out is None:
+            out = row.get("first_out")
+        kg = row.get("kg_bc")
+        if kg is None:
+            kg = row.get("kg")
+        if _lot_in_stock_final(fe, out, day):
+            total += to_float(kg)
     return total
+
+
+def build_bc_kg_detalle_diario_from_lots(
+    lot_detalle: list[dict[str, Any]],
+    start: dt.date,
+    end: dt.date,
+    detalle_diario_report: list[dict[str, Any]] | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Balance diario en kg: Inicial + Produccion (Salidas CAJA) − Primera salida.
+
+    Produccion = alta stock E/G por coincidencia de lote Innova CAJA ∩ BC (1 lote = 1 caja).
+    """
+    lots: list[dict[str, Any]] = []
+    for row in lot_detalle:
+        fe = sql_row_to_date(row.get("fe_empaque"))
+        if fe is None:
+            continue
+        lots.append(
+            {
+                "fe": fe,
+                "out": sql_row_to_date(row.get("first_sale")),
+                "kg": to_float(row.get("kg_bc")),
+            }
+        )
+
+    days: list[dt.date] = []
+    if detalle_diario_report:
+        for det in detalle_diario_report:
+            days.append(parse_fecha_es_date(det["fecha"]))
+    else:
+        current = start
+        while current <= end:
+            days.append(current)
+            current += dt.timedelta(days=1)
+
+    empaque_by_day: dict[dt.date, tuple[float, int]] = {}
+    salida_by_day: dict[dt.date, tuple[float, int]] = {}
+    for lot in lots:
+        fe = lot["fe"]
+        out = lot["out"]
+        kg = lot["kg"]
+        if start <= fe <= end:
+            prev_kg, prev_n = empaque_by_day.get(fe, (0.0, 0))
+            empaque_by_day[fe] = (prev_kg + kg, prev_n + 1)
+        if out is not None and start <= out <= end:
+            prev_kg, prev_n = salida_by_day.get(out, (0.0, 0))
+            salida_by_day[out] = (prev_kg + kg, prev_n + 1)
+
+    stock_ini_start = sum(
+        lot["kg"] for lot in lots if _lot_in_stock_inicial(lot["fe"], lot["out"], start)
+    )
+    lotes_ini_start = sum(
+        1 for lot in lots if _lot_in_stock_inicial(lot["fe"], lot["out"], start)
+    )
+    stock_ini_carry = stock_ini_start
+    lotes_ini_carry = lotes_ini_start
+
+    detalle: list[dict[str, Any]] = []
+    kg_empaque_mes = 0.0
+    lotes_empaque_mes = 0
+    kg_salidas_mes = 0.0
+    lotes_salidas_mes = 0
+    kg_stock_real_prev = stock_ini_start
+
+    for day in days:
+        kg_ini = stock_ini_carry
+        lotes_ini = lotes_ini_carry
+        kg_emp, lotes_emp = empaque_by_day.get(day, (0.0, 0))
+        kg_sal, lotes_sal = salida_by_day.get(day, (0.0, 0))
+        kg_teo = kg_ini + kg_emp - kg_sal
+        lotes_teo = lotes_ini + lotes_emp - lotes_sal
+        kg_real = sum(lot["kg"] for lot in lots if _lot_in_stock_final(lot["fe"], lot["out"], day))
+        lotes_real = sum(1 for lot in lots if _lot_in_stock_final(lot["fe"], lot["out"], day))
+        kg_empaque_mes += kg_emp
+        lotes_empaque_mes += lotes_emp
+        kg_salidas_mes += kg_sal
+        lotes_salidas_mes += lotes_sal
+        detalle.append(
+            {
+                "fecha": day.strftime("%d/%m/%Y"),
+                "kg_stock_inicial": kg_ini,
+                "lotes_stock_inicial": lotes_ini,
+                "kg_stock_real_inicial": kg_stock_real_prev,
+                "kg_ventas_stock_antiguo": 0.0,
+                "lotes_ventas_stock_antiguo": 0,
+                "kg_empaque": kg_emp,
+                "lotes_empaque": lotes_emp,
+                # Misma formula que cajas: Produccion (Salidas CAJA) / Primera salida.
+                "kg_produccion": kg_emp,
+                "kg_ventas": kg_sal,
+                "lotes_ventas": lotes_sal,
+                "kg_stock_final_teorico": kg_teo,
+                "kg_stock_final_real": kg_real,
+                "kg_stock_teorico": kg_teo,
+                "kg_stock_real_cierre": kg_real,
+                "kg_real_variacion": kg_real - kg_stock_real_prev,
+                "kg_diferencia": kg_teo - kg_real,
+                "lotes_stock_teorico": lotes_teo,
+                "lotes_stock_real": lotes_real,
+            }
+        )
+        stock_ini_carry = kg_teo
+        lotes_ini_carry = lotes_teo
+        kg_stock_real_prev = kg_real
+
+    totals = {
+        "kg_stock_inicial": stock_ini_start,
+        "lotes_stock_inicial": lotes_ini_start,
+        "kg_empaque_mes": kg_empaque_mes,
+        "lotes_empaque_mes": lotes_empaque_mes,
+        "kg_salidas_mes": kg_salidas_mes,
+        "lotes_salidas_mes": lotes_salidas_mes,
+        "kg_stock_teorico": detalle[-1]["kg_stock_final_teorico"] if detalle else 0.0,
+        "kg_stock_real": detalle[-1]["kg_stock_final_real"] if detalle else 0.0,
+        "lotes_stock_final": detalle[-1]["lotes_stock_real"] if detalle else 0,
+    }
+    return detalle, totals
 
 
 def _format_sql_date(value: Any) -> str:
@@ -2225,13 +2356,23 @@ def build_bc_balance_lot_detalle(
             material, pattern, item_no, conversion_by_bascula
         )
         tipo_key = cod_producto
-        tipo_nombre = (
-            material_nombre
-            or conv_desc
-            or item_description
-            or cod_producto
-            or "(sin tipo)"
-        )
+        # Si el SKU viene del ILE, la descripcion BC debe mandar (como stock inicial).
+        if enlace_origen == "item_no_bc":
+            tipo_nombre = (
+                item_description
+                or material_nombre
+                or conv_desc
+                or cod_producto
+                or "(sin tipo)"
+            )
+        else:
+            tipo_nombre = (
+                material_nombre
+                or conv_desc
+                or item_description
+                or cod_producto
+                or "(sin tipo)"
+            )
 
         fe_empaque = (
             snap.get("fe_empaque")
@@ -2379,9 +2520,9 @@ def build_bc_balance_por_tipo_cajas(
 
     Misma medida que el balance en kg / stock real:
       - Unidad: 1 lote = 1 caja.
-      - Entradas del teorico = lotes con fecha de empaque ese dia.
-      - Salidas del teorico = lotes con primera salida (Type 1 o 3) ese dia.
-      - Stock teorico = Inicial + Empaque − Salidas (encadenado).
+      - Produccion (Salidas CAJA) = lotes coincidentes Innova∩BC con fecha produccion ese dia (alta stock).
+      - Primera salida = Type 1 o 3 ese dia (baja stock, una vez).
+      - Stock teorico = Inicial + Produccion − Primera salida (encadenado).
     Las columnas Type 2 / Type 1 / Type 3 siguen mostrando movimientos ILE
     (informativo, en lotes); el check usa la misma linea de vida del lote
     que el stock real.
@@ -2636,7 +2777,8 @@ NOTA_BC_BALANCE_MOVIMIENTOS_ILE = (
     "El stock real sigue contando 1 lote = 1 caja (o kg del lote). "
     "Por eso el check puede no ser cero: Quantity≠1, doble salida Type 1+3, o Type 3 con Kilos=0. "
     "El balance de almacén (pestañas Balance BC E/G y Balance por tipo cajas) usa otra lógica "
-    "más coherente con el stock: Inicial + Empaque − Primera salida (misma base que el check de kg)."
+    "más coherente con el stock: Inicial + Producción (Salidas CAJA) − Primera salida "
+    "(misma base que el check de kg)."
 )
 NOTA_BC_BALANCE_MOVIMIENTOS_ILE_TITULO = (
     "Nota — balance por movimientos ILE (no es el stock de almacén)"
@@ -3339,6 +3481,55 @@ def build_bc_stock_snapshot_por_producto(
     return lista_inicial, lista_final, totals
 
 
+def enrich_bc_detalle_merma_peso(
+    detalle_bc: list[dict[str, Any]],
+    report_data: dict[str, Any],
+) -> dict[str, Any]:
+    """Añade merma diaria Innova−BC al detalle del balance E/G (no altera el check de stock)."""
+    by_fecha: dict[str, dict[str, Any]] = {}
+    for det in report_data.get("detalle_diario") or []:
+        fecha = str(det.get("fecha") or "")
+        if fecha:
+            by_fecha[fecha] = det
+    for day in report_data.get("bc_cruce_detalle") or []:
+        fecha = str(day.get("fecha") or "")
+        if fecha and fecha not in by_fecha:
+            by_fecha[fecha] = day
+
+    tot_innova = 0.0
+    tot_bc = 0.0
+    for row in detalle_bc:
+        src = by_fecha.get(str(row.get("fecha") or ""), {})
+        kg_innova = to_float(src.get("bc_kg_innova_enlazado"))
+        kg_bc = to_float(src.get("bc_kg_bc_enlazado"))
+        if "bc_kg_diferencia_enlazado" in src:
+            kg_merma = to_float(src.get("bc_kg_diferencia_enlazado"))
+        else:
+            kg_merma = kg_innova - kg_bc
+        pct = (kg_merma / kg_innova * 100.0) if kg_innova else None
+        row["kg_innova_enlazado"] = kg_innova
+        row["kg_bc_enlazado"] = kg_bc
+        row["kg_merma_peso"] = kg_merma
+        row["pct_merma_peso"] = pct
+        tot_innova += kg_innova
+        tot_bc += kg_bc
+
+    kpis = report_data.get("kpis") or {}
+    if kpis.get("bc_kg_innova_enlazado") is not None:
+        tot_innova = to_float(kpis.get("bc_kg_innova_enlazado"))
+        tot_bc = to_float(kpis.get("bc_kg_bc_enlazado"))
+    tot_merma = tot_innova - tot_bc
+    if kpis.get("bc_kg_diferencia_enlazado") is not None:
+        tot_merma = to_float(kpis.get("bc_kg_diferencia_enlazado"))
+    pct_tot = (tot_merma / tot_innova * 100.0) if tot_innova else None
+    return {
+        "kg_innova_enlazado": tot_innova,
+        "kg_bc_enlazado": tot_bc,
+        "kg_merma_peso": tot_merma,
+        "pct_merma_peso": pct_tot,
+    }
+
+
 def attach_bc_balance_eg_to_report(
     report_data: dict[str, Any],
     bc_balance: dict[str, Any],
@@ -3346,91 +3537,7 @@ def attach_bc_balance_eg_to_report(
     innova_lotes_material: list[dict[str, Any]] | None = None,
     conversion_productos: dict[str, Any] | None = None,
 ) -> None:
-    kg_stock_inicial = bc_balance["kg_stock_inicial"]
     kg_stock_apertura = bc_balance["kg_stock_apertura"]
-    kg_ventas = bc_balance["kg_ventas"]
-    kg_produccion = to_float(report_data["kpis"]["kg_salida_no_tina"])
-
-    ventas_by_date: dict[str, float] = {}
-    ventas_lotes_by_date: dict[str, int] = {}
-    for row in bc_balance["ventas_diario"]:
-        key = sql_row_date_key(row["fecha"])
-        ventas_by_date[key] = to_float(row["kg"])
-        ventas_lotes_by_date[key] = int(row.get("lotes") or 0)
-
-    stock_inicial_ile_by_date: dict[str, float] = {}
-    stock_inicial_ile_lotes_by_date: dict[str, int] = {}
-    for row in bc_balance.get("stock_inicial_ile_diario") or []:
-        key = sql_row_date_key(row["fecha"])
-        stock_inicial_ile_by_date[key] = to_float(row["kg"])
-        stock_inicial_ile_lotes_by_date[key] = int(row.get("lotes") or 0)
-
-    ventas_stock_antiguo_by_date: dict[str, float] = {}
-    ventas_stock_antiguo_lotes_by_date: dict[str, int] = {}
-    for row in bc_balance.get("ventas_stock_antiguo_diario") or []:
-        key = sql_row_date_key(row["fecha"])
-        ventas_stock_antiguo_by_date[key] = to_float(row["kg"])
-        ventas_stock_antiguo_lotes_by_date[key] = int(row.get("lotes") or 0)
-
-    empaque_by_date: dict[str, float] = {}
-    empaque_lotes_by_date: dict[str, int] = {}
-    for row in bc_balance.get("empaque_diario") or []:
-        key = sql_row_date_key(row["fecha"])
-        empaque_by_date[key] = to_float(row["kg"])
-        empaque_lotes_by_date[key] = int(row.get("lotes") or 0)
-
-    lot_snapshot = bc_balance.get("lot_snapshot") or []
-
-    detalle_bc: list[dict[str, Any]] = []
-    kg_stock_final_real_prev = kg_stock_apertura
-    for det in report_data["detalle_diario"]:
-        date_key = parse_fecha_es(det["fecha"])
-        day = parse_fecha_es_date(det["fecha"])
-        kg_stock_ini_dia = stock_inicial_ile_by_date.get(date_key, 0.0)
-        lotes_stock_ini_dia = stock_inicial_ile_lotes_by_date.get(date_key, 0)
-        kg_stock_real_ini_dia = kg_stock_final_real_prev
-        kg_ventas_dia = ventas_by_date.get(date_key, 0.0)
-        lotes_ventas_dia = ventas_lotes_by_date.get(date_key, 0)
-        kg_ventas_stock_antiguo = ventas_stock_antiguo_by_date.get(date_key, 0.0)
-        lotes_ventas_stock_antiguo = ventas_stock_antiguo_lotes_by_date.get(date_key, 0)
-        kg_empaque_dia = empaque_by_date.get(date_key, 0.0)
-        lotes_empaque_dia = empaque_lotes_by_date.get(date_key, 0)
-        kg_prod_dia = to_float(det["kg_salida_no_tina"])
-        kg_stock_final_teorico = kg_stock_ini_dia + kg_prod_dia - kg_ventas_dia
-        kg_stock_final_real = compute_bc_stock_real_cierre(lot_snapshot, day)
-        kg_real_variacion = kg_stock_final_real - kg_stock_real_ini_dia
-        kg_diferencia = kg_stock_final_teorico - kg_stock_final_real
-        kg_stock_final_real_prev = kg_stock_final_real
-        detalle_bc.append(
-            {
-                "fecha": det["fecha"],
-                "kg_stock_inicial": kg_stock_ini_dia,
-                "lotes_stock_inicial": lotes_stock_ini_dia,
-                "kg_stock_real_inicial": kg_stock_real_ini_dia,
-                "kg_ventas_stock_antiguo": kg_ventas_stock_antiguo,
-                "lotes_ventas_stock_antiguo": lotes_ventas_stock_antiguo,
-                "kg_empaque": kg_empaque_dia,
-                "lotes_empaque": lotes_empaque_dia,
-                "kg_produccion": kg_prod_dia,
-                "kg_ventas": kg_ventas_dia,
-                "lotes_ventas": lotes_ventas_dia,
-                "kg_stock_final_teorico": kg_stock_final_teorico,
-                "kg_stock_final_real": kg_stock_final_real,
-                "kg_stock_teorico": kg_stock_final_teorico,
-                "kg_stock_real_cierre": kg_stock_final_real,
-                "kg_real_variacion": kg_real_variacion,
-                "kg_diferencia": kg_diferencia,
-            }
-        )
-
-    if detalle_bc:
-        kg_stock_real = detalle_bc[-1]["kg_stock_final_real"]
-        kg_stock_teorico = detalle_bc[-1]["kg_stock_final_teorico"]
-    else:
-        kg_stock_real = bc_balance["kg_stock_final"]
-        kg_stock_teorico = kg_stock_apertura + kg_produccion - kg_ventas
-    kg_check = kg_stock_teorico - kg_stock_real
-    check_ok = abs(kg_check) <= BC_BALANCE_CHECK_TOLERANCE_KG
 
     period_start = parse_fecha_es_date(report_data["detalle_diario"][0]["fecha"]) if report_data.get("detalle_diario") else None
     period_end = parse_fecha_es_date(report_data["detalle_diario"][-1]["fecha"]) if report_data.get("detalle_diario") else None
@@ -3438,12 +3545,39 @@ def attach_bc_balance_eg_to_report(
         period_start = dt.date.fromisoformat(str(bc_balance["sql_trace"]["params"]["start"]))
     if period_end is None:
         period_end = dt.date.fromisoformat(str(bc_balance["sql_trace"]["params"]["end"]))
+
     lot_detalle = build_bc_balance_lot_detalle(
         bc_balance,
         innova_lotes_material,
         period_start=period_start,
         conversion_by_bascula=(conversion_productos or {}).get("by_bascula"),
     )
+    # Misma linea de vida que cajas: Inicial + Produccion (Salidas CAJA) − Primera salida.
+    detalle_bc, kg_totals = build_bc_kg_detalle_diario_from_lots(
+        lot_detalle,
+        period_start,
+        period_end,
+        detalle_diario_report=report_data.get("detalle_diario"),
+    )
+    merma_peso = enrich_bc_detalle_merma_peso(detalle_bc, report_data)
+    kg_stock_inicial = kg_totals["kg_stock_inicial"]
+    kg_produccion = kg_totals["kg_empaque_mes"]  # Produccion = coincidencia lote Innova∩BC
+    kg_ventas = kg_totals["kg_salidas_mes"]  # Primera salida
+    kg_stock_teorico = kg_totals["kg_stock_teorico"]
+    kg_stock_real = kg_totals["kg_stock_real"]
+    kg_check = kg_stock_teorico - kg_stock_real
+    check_ok = abs(kg_check) <= BC_BALANCE_CHECK_TOLERANCE_KG
+    lotes_stock_inicial = kg_totals["lotes_stock_inicial"]
+    lotes_empaque_mes = kg_totals["lotes_empaque_mes"]
+    lotes_ventas = kg_totals["lotes_salidas_mes"]
+    lotes_stock_final = kg_totals["lotes_stock_final"]
+    lotes_stock_final_bc = sum(
+        1
+        for row in lot_detalle
+        if _lot_in_stock_final(row.get("fe_empaque"), row.get("first_sale"), period_end)
+        and to_float(row.get("kg_bc")) > 0
+    )
+
     detalle_por_tipo = build_bc_balance_por_tipo(lot_detalle)
     detalle_por_tipo_cajas, detalle_diario_cajas = build_bc_balance_por_tipo_cajas(
         lot_detalle,
@@ -3481,21 +3615,26 @@ def attach_bc_balance_eg_to_report(
     report_data["bc_balance_eg"] = {
         "loaded": True,
         "kg_stock_inicial": kg_stock_inicial,
-        "lotes_stock_inicial": bc_balance["lotes_stock_inicial"],
+        "lotes_stock_inicial": lotes_stock_inicial,
         "kg_stock_apertura": kg_stock_apertura,
         "lotes_stock_apertura": bc_balance["lotes_stock_apertura"],
         "kg_produccion": kg_produccion,
         "kg_ventas": kg_ventas,
-        "lotes_ventas": bc_balance["lotes_ventas"],
+        "lotes_ventas": lotes_ventas,
         "kg_stock_teorico": kg_stock_teorico,
         "kg_stock_real": kg_stock_real,
         "kg_stock_final": kg_stock_real,
-        "lotes_stock_final": bc_balance["lotes_stock_final"],
-        "lotes_stock_final_bc": bc_balance["lotes_stock_final_bc"],
+        "lotes_stock_final": lotes_stock_final,
+        "lotes_stock_final_bc": lotes_stock_final_bc,
         "kg_check": kg_check,
         "check_ok": check_ok,
-        "lotes_empaque_mes": bc_balance["lotes_empaque_mes"],
-        "kg_empaque_mes": bc_balance.get("kg_empaque_mes", 0.0),
+        "kg_innova_enlazado": merma_peso["kg_innova_enlazado"],
+        "kg_bc_enlazado": merma_peso["kg_bc_enlazado"],
+        "kg_merma_peso": merma_peso["kg_merma_peso"],
+        "pct_merma_peso": merma_peso["pct_merma_peso"],
+        "lotes_empaque_mes": lotes_empaque_mes,
+        "kg_empaque_mes": kg_totals["kg_empaque_mes"],
+        "kg_ventas_stock_antiguo_mes": bc_balance.get("kg_ventas_stock_antiguo_mes", 0.0),
         "detalle_diario": detalle_bc,
         # Sin detalle por lote en el informe (HTML pesado); se usa solo para agregados.
         "lot_detalle": [],
@@ -3527,6 +3666,10 @@ def attach_bc_balance_eg_to_report(
     k["bc_bal_kg_stock_final"] = kg_stock_real
     k["bc_bal_kg_check"] = kg_check
     k["bc_bal_check_ok"] = check_ok
+    k["bc_bal_kg_merma_peso"] = merma_peso["kg_merma_peso"]
+    k["bc_bal_pct_merma_peso"] = merma_peso["pct_merma_peso"]
+    k["bc_bal_kg_innova_enlazado"] = merma_peso["kg_innova_enlazado"]
+    k["bc_bal_kg_bc_enlazado"] = merma_peso["kg_bc_enlazado"]
     k["bc_bal_cajas_stock_inicial"] = cajas_stock_inicial
     k["bc_bal_cajas_entradas"] = cajas_entradas
     k["bc_bal_cajas_ventas"] = cajas_ventas
@@ -4207,6 +4350,9 @@ def build_bc_check_diario_table_rows(detalle: list[dict[str, Any]]) -> str:
             f"<td>{html.escape(r['fecha'])}</td>"
             f"<td class='num'>{fmt_num(r['kg_empaque'])}</td>"
             f"<td class='num'>{int(r.get('lotes_empaque') or 0)}</td>"
+            f"<td class='num'>{fmt_num(r.get('kg_innova_enlazado', 0))}</td>"
+            f"<td class='num'>{fmt_num(r.get('kg_bc_enlazado', 0))}</td>"
+            f"<td class='num'>{fmt_num(r.get('kg_merma_peso', 0))}</td>"
             f"<td class='num'>{fmt_num(r['kg_stock_inicial'])}</td>"
             f"<td class='num'>{int(r.get('lotes_stock_inicial') or 0)}</td>"
             f"<td class='num'>{fmt_num(r['kg_ventas'])}</td>"
@@ -4231,6 +4377,9 @@ def build_bc_balance_eg_table_rows(detalle: list[dict[str, Any]]) -> str:
             f"<td>{html.escape(r['fecha'])}</td>"
             f"<td class='num'>{fmt_num(r['kg_stock_inicial'])}</td>"
             f"<td class='num'>{fmt_num(r['kg_produccion'])}</td>"
+            f"<td class='num'>{fmt_num(r.get('kg_innova_enlazado', 0))}</td>"
+            f"<td class='num'>{fmt_num(r.get('kg_bc_enlazado', 0))}</td>"
+            f"<td class='num'>{fmt_num(r.get('kg_merma_peso', 0))}</td>"
             f"<td class='num'>{fmt_num(r['kg_ventas'])}</td>"
             f"<td class='num'>{fmt_num(r.get('kg_stock_final_teorico', r.get('kg_stock_teorico', 0)))}</td>"
             f"<td class='num'>{fmt_num(r.get('kg_stock_final_real', r.get('kg_stock_real_cierre', 0)))}</td>"
@@ -4267,6 +4416,9 @@ def build_bc_balance_eg_section_html(
     check_ok = bool(bc_balance.get("check_ok"))
     check_class = "check-ok" if check_ok else "check-warn"
     check_label = "Cuadra" if check_ok else "Descuadre"
+    kg_merma_peso = to_float(bc_balance.get("kg_merma_peso"))
+    pct_merma_peso = bc_balance.get("pct_merma_peso")
+    merma_class = "check-warn" if abs(kg_merma_peso) > 0.01 else "check-ok"
     reglas_items = "".join(f"<li>{html.escape(rule)}</li>" for rule in PREMISA_BC_BALANCE_EG_REGLAS)
     stock_ini_sub = (
         f"ILE: empaque anterior al dia, venta/ajuste neg. ese dia o despues · "
@@ -4281,24 +4433,29 @@ def build_bc_balance_eg_section_html(
           <div class="kpi-sub">{html.escape(stock_ini_sub)}</div>
         </article>
         <article class="card">
-          <div class="kpi-title">Salidas Innova (kg)</div>
+          <div class="kpi-title">{LABEL_BC_PRODUCCION} (kg)</div>
           <div class="kpi-value">{fmt_num(bc_balance['kg_produccion'])}</div>
-          <div class="kpi-sub">Salidas CAJA del periodo (premisa 3)</div>
+          <div class="kpi-sub">{html.escape(DEF_BC_PRODUCCION)}</div>
+        </article>
+        <article class="card {merma_class}">
+          <div class="kpi-title">{LABEL_BC_MERMA_PESO}</div>
+          <div class="kpi-value">{fmt_num(kg_merma_peso)}</div>
+          <div class="kpi-sub">Innova {fmt_num(bc_balance.get('kg_innova_enlazado', 0))} − BC {fmt_num(bc_balance.get('kg_bc_enlazado', 0))} · {fmt_pct(pct_merma_peso)} sobre Innova</div>
         </article>
         <article class="card">
-          <div class="kpi-title">Ventas BC E/G (kg)</div>
+          <div class="kpi-title">Primera salida BC (kg)</div>
           <div class="kpi-value">{fmt_num(bc_balance['kg_ventas'])}</div>
-          <div class="kpi-sub">{bc_balance['lotes_ventas']:,} lotes · Location E y G</div>
+          <div class="kpi-sub">{bc_balance['lotes_ventas']:,} lotes · Type 1 o 3 (una vez)</div>
         </article>
         <article class="card">
           <div class="kpi-title">Stock final teorico (kg)</div>
           <div class="kpi-value">{fmt_num(bc_balance['kg_stock_teorico'])}</div>
-          <div class="kpi-sub">Stock inicial + Salidas Innova − Ventas</div>
+          <div class="kpi-sub">Stock inicial + {LABEL_BC_PRODUCCION} − Primera salida</div>
         </article>
         <article class="card">
           <div class="kpi-title">Stock final real (kg)</div>
           <div class="kpi-value">{fmt_num(bc_balance['kg_stock_real'])}</div>
-          <div class="kpi-sub">Empaque del periodo sin venta · {bc_balance['lotes_stock_final']:,} lotes ({bc_balance['lotes_stock_final_bc']:,} con kg BC)</div>
+          <div class="kpi-sub">Lotes en stock al cierre · {bc_balance['lotes_stock_final']:,} lotes ({bc_balance['lotes_stock_final_bc']:,} con kg BC)</div>
         </article>
         <article class="card {check_class}">
           <div class="kpi-title">Check (kg)</div>
@@ -4315,25 +4472,29 @@ def build_bc_balance_eg_section_html(
           </button>
         </div>
         <p class="muted" style="margin-top:0;">
-          Tabla para validar contra Excel: solo movimientos BC en almacenes E y G.
-          <strong>Empaque</strong> = lotes nuevos por [Fecha empaque] del dia.
-          <strong>Stock inicial</strong> = ILE: [Fecha empaque] &lt; dia y venta o ajuste negativo (Type 1/3) en ese dia o posteriores.
-          <strong>Ventas</strong> = ILE Entry Type 1 por [Posting Date].
-          <strong>Stock final real</strong> = empaque acumulado del periodo sin venta hasta ese dia.
-          <strong>Stock final teorico</strong> = Stock inicial + Salidas Innova − Ventas (comparar con stock final real).
+          Tabla para validar contra Excel: misma linea de vida del lote en kg y en cajas.
+          <strong>{LABEL_BC_PRODUCCION}</strong> = {html.escape(DEF_BC_PRODUCCION)}
+          <strong>Stock inicial</strong> = produccion anterior al dia; primera salida ese dia o despues.
+          <strong>Primera salida</strong> = Type 1 o Type 3 del lote (una sola vez).
+          <strong>Stock final real</strong> = lotes en stock al cierre del dia.
+          <strong>Stock final teorico</strong> = Stock inicial + {LABEL_BC_PRODUCCION} − Primera salida (igual que cajas).
           <strong>Δ real</strong> = stock final real − stock inicial del dia.
-          <strong>Check</strong> = Stock final teorico − Stock final real.
+          <strong>Check</strong> = Stock final teorico − Stock final real (0 por construccion).
+          <strong>{LABEL_BC_MERMA_PESO}</strong> = kg Innova enlazado − kg BC del mismo lote (desvio de bascula; no entra en el check de stock).
         </p>
         <table id="bcCheckDiarioTable">
           <thead>
             <tr>
               <th>Fecha</th>
-              <th class="num">Empaque BC (kg)</th>
-              <th class="num">Lotes empaque</th>
+              <th class="num">{LABEL_BC_PRODUCCION} (kg)</th>
+              <th class="num">Lotes produccion</th>
+              <th class="num">Kg Innova</th>
+              <th class="num">Kg BC</th>
+              <th class="num">{LABEL_BC_MERMA_PESO}</th>
               <th class="num">Stock inicial (kg)</th>
               <th class="num">Lotes</th>
-              <th class="num">Ventas BC (kg)</th>
-              <th class="num">Lotes ventas</th>
+              <th class="num">Primera salida (kg)</th>
+              <th class="num">Lotes salida</th>
               <th class="num">Stock final real (kg)</th>
               <th class="num">Δ real (kg)</th>
               <th class="num">Stock final teorico (kg)</th>
@@ -4346,6 +4507,9 @@ def build_bc_balance_eg_section_html(
               <td><strong>TOTAL / CIERRE</strong></td>
               <td class="num"><strong>{fmt_num(bc_balance.get('kg_empaque_mes', 0))}</strong></td>
               <td class="num"><strong>{bc_balance['lotes_empaque_mes']:,}</strong></td>
+              <td class="num"><strong>{fmt_num(bc_balance.get('kg_innova_enlazado', 0))}</strong></td>
+              <td class="num"><strong>{fmt_num(bc_balance.get('kg_bc_enlazado', 0))}</strong></td>
+              <td class="num"><strong class="{merma_class}">{fmt_num(kg_merma_peso)}</strong></td>
               <td class="num"><strong>{fmt_num(bc_balance['kg_stock_inicial'])}</strong></td>
               <td class="num"><strong>{bc_balance['lotes_stock_inicial']:,}</strong></td>
               <td class="num"><strong>{fmt_num(bc_balance['kg_ventas'])}</strong></td>
@@ -4367,27 +4531,33 @@ def build_bc_balance_eg_section_html(
           </button>
         </div>
         <p class="muted" style="margin-top:0;">
-          <strong>Stock inicial (dia)</strong> = ILE: [Fecha empaque] &lt; dia; venta o ajuste negativo (Entry Type 1/3) en ese dia o posteriores.
-          <strong>Salidas Innova</strong> = salidas CAJA del dia (premisa 3).
-          <strong>Ventas</strong> = ILE Entry Type 1 en E/G por [Posting Date].
-          <strong>Stock final teorico</strong> = Stock inicial + Salidas Innova − Ventas.
-          <strong>Stock final real</strong> = empaque del periodo hasta ese dia sin venta hasta ese dia.
-          <strong>Check</strong> = Stock final teorico − Stock final real.
-          <strong>Stock apertura</strong> = empaque anterior al periodo sin venta previa (E/G): <strong>{fmt_num(bc_balance['kg_stock_apertura'])}</strong> kg.
-          <strong>Fines de semana</strong> = sin Salidas Innova ni Ventas; stock inicial y finales se arrastran del dia anterior.
+          <strong>Stock inicial (dia)</strong> = produccion anterior al dia; primera salida ese dia o posteriores.
+          <strong>{LABEL_BC_PRODUCCION}</strong> = {html.escape(DEF_BC_PRODUCCION)}
+          <strong>Primera salida</strong> = Type 1 o Type 3 del lote (una sola vez).
+          <strong>Stock final teorico</strong> = Stock inicial + {LABEL_BC_PRODUCCION} − Primera salida (igual que cajas).
+          <strong>Stock final real</strong> = lotes en stock al cierre del dia.
+          <strong>Check</strong> = Stock final teorico − Stock final real (0 por construccion).
+          <strong>{LABEL_BC_MERMA_PESO}</strong> = kg Innova − kg BC del lote enlazado (no altera el stock teorico).
+          <strong>Stock apertura</strong> = produccion anterior al periodo sin venta previa (E/G): <strong>{fmt_num(bc_balance['kg_stock_apertura'])}</strong> kg.
+          <strong>Fines de semana</strong> = sin {LABEL_BC_PRODUCCION} ni Primera salida; stock inicial y finales se arrastran del dia anterior.
         </p>
         <p class="balance-formula">
           Stock final teorico fin de mes: <strong>{fmt_num(bc_balance['kg_stock_teorico'])}</strong>
           &nbsp;|&nbsp; Stock final real fin de mes: <strong>{fmt_num(bc_balance['kg_stock_real'])}</strong>
           <span class="{check_class}">(check {fmt_num(bc_balance['kg_check'])} kg)</span>
+          &nbsp;|&nbsp; {LABEL_BC_MERMA_PESO}: <strong class="{merma_class}">{fmt_num(kg_merma_peso)}</strong>
+          ({fmt_pct(pct_merma_peso)})
         </p>
         <table id="bcBalanceEgTable">
           <thead>
             <tr>
               <th>Fecha</th>
               <th class="num">Stock inicial (kg)</th>
-              <th class="num">Salidas Innova (kg)</th>
-              <th class="num">Ventas BC E/G (kg)</th>
+              <th class="num">{LABEL_BC_PRODUCCION} (kg)</th>
+              <th class="num">Kg Innova</th>
+              <th class="num">Kg BC</th>
+              <th class="num">{LABEL_BC_MERMA_PESO}</th>
+              <th class="num">Primera salida (kg)</th>
               <th class="num">Stock final teorico (kg)</th>
               <th class="num">Stock final real (kg)</th>
               <th class="num">Check (kg)</th>
@@ -4399,6 +4569,9 @@ def build_bc_balance_eg_section_html(
               <td><strong>TOTAL / CIERRE</strong></td>
               <td class="num"><strong>{fmt_num(bc_balance['kg_stock_inicial'])}</strong></td>
               <td class="num"><strong>{fmt_num(bc_balance['kg_produccion'])}</strong></td>
+              <td class="num"><strong>{fmt_num(bc_balance.get('kg_innova_enlazado', 0))}</strong></td>
+              <td class="num"><strong>{fmt_num(bc_balance.get('kg_bc_enlazado', 0))}</strong></td>
+              <td class="num"><strong class="{merma_class}">{fmt_num(kg_merma_peso)}</strong></td>
               <td class="num"><strong>{fmt_num(bc_balance['kg_ventas'])}</strong></td>
               <td class="num"><strong>{fmt_num(bc_balance['kg_stock_teorico'])}</strong></td>
               <td class="num"><strong>{fmt_num(bc_balance['kg_stock_real'])}</strong></td>
@@ -4452,7 +4625,7 @@ def build_bc_balance_eg_section_html(
         <h3 class="premisa-head">Reglas balance BC E/G</h3>
         <ul class="premisa-list">{reglas_items}</ul>
         <p class="premisa-note muted">
-          Lotes con empaque en el periodo (BC): {bc_balance['lotes_empaque_mes']:,}.
+          Lotes de produccion (Salidas CAJA, coincidencia Innova∩BC) en el periodo: {bc_balance['lotes_empaque_mes']:,}.
           Tolerancia check: ±{fmt_num(BC_BALANCE_CHECK_TOLERANCE_KG, 0)} kg.
         </p>
       </section>
@@ -4537,9 +4710,9 @@ def build_bc_balance_tipo_cajas_section_html(
           <div class="kpi-sub">ILE dia 1 · empaque &lt; {format_date_es(start)}</div>
         </article>
         <article class="card">
-          <div class="kpi-title">Entradas (empaque)</div>
+          <div class="kpi-title">{LABEL_BC_PRODUCCION} (cajas)</div>
           <div class="kpi-value">{cajas_ent:,}</div>
-          <div class="kpi-sub">Lotes empacados en el periodo · 1 lote = 1 caja</div>
+          <div class="kpi-sub">Coincidencia lote Innova∩BC · 1 lote = 1 caja</div>
         </article>
         <article class="card">
           <div class="kpi-title">Salidas (1ª salida)</div>
@@ -4554,7 +4727,7 @@ def build_bc_balance_tipo_cajas_section_html(
         <article class="card">
           <div class="kpi-title">Stock final teorico (cajas)</div>
           <div class="kpi-value">{cajas_teo:,}</div>
-          <div class="kpi-sub">Inicial + Empaque − Salidas (igual base que stock real)</div>
+          <div class="kpi-sub">Inicial + {LABEL_BC_PRODUCCION} − Salidas</div>
         </article>
         <article class="card">
           <div class="kpi-title">Stock final real (cajas)</div>
@@ -4577,7 +4750,7 @@ def build_bc_balance_tipo_cajas_section_html(
         </div>
         <p class="muted" style="margin-top:0;">
           Misma base que el stock real y el check de kg (unidad: <strong>1 lote = 1 caja</strong>):
-          <strong>teórico = Inicial + Empaque − Primera salida</strong>
+          <strong>teórico = Inicial + {LABEL_BC_PRODUCCION} − Primera salida</strong>
           (encadenado: final dia N = inicial dia N+1).
           <strong>Ajustes neg.</strong> = movimientos Type 3 ILE (informativo).
         </p>
@@ -4586,8 +4759,8 @@ def build_bc_balance_tipo_cajas_section_html(
             <tr>
               <th>Fecha</th>
               <th class="num">Stock inicial (cajas)</th>
-              <th class="num">Entradas BC (ajustes +)</th>
-              <th class="num">Ventas BC (cajas)</th>
+              <th class="num">{LABEL_BC_PRODUCCION} (cajas)</th>
+              <th class="num">Primera salida (cajas)</th>
               <th class="num">Ajustes neg. BC</th>
               <th class="num">Stock final teorico</th>
               <th class="num">Stock final real</th>
@@ -4620,7 +4793,7 @@ def build_bc_balance_tipo_cajas_section_html(
         <p class="muted" style="margin-top:0;">
           Producto BC = <code>Cod. producto</code> / <code>[Item No.]</code>.
           Misma medida que kg: <strong>1 lote = 1 caja</strong>;
-          teórico = Inicial + Empaque − Primera salida (Type 1 o 3).
+          teórico = Inicial + {LABEL_BC_PRODUCCION} − Primera salida (Type 1 o 3).
           Periodo: <strong>{format_date_es(start)}</strong> a <strong>{format_date_es(end)}</strong>.
           {len(detalle):,} productos.
         </p>
@@ -4637,8 +4810,8 @@ def build_bc_balance_tipo_cajas_section_html(
               <th>Cod. bascula Innova</th>
               <th>Pattern Innova</th>
               <th class="num">Stock inicial (cajas)</th>
-              <th class="num">Entradas BC (ajustes +)</th>
-              <th class="num">Ventas BC (cajas)</th>
+              <th class="num">{LABEL_BC_PRODUCCION} (cajas)</th>
+              <th class="num">Primera salida (cajas)</th>
               <th class="num">Ajustes neg. BC</th>
               <th class="num">Stock final teorico</th>
               <th class="num">Stock final real</th>
