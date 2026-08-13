@@ -24,7 +24,7 @@ Documento canonico del proyecto **CALCULO_BIOMASA**. Cualquier cambio en reglas 
 | 5 | **Merma** — balance: Entradas TINA − Salidas CAJA − Stock de tinas | Confirmada (implementada) |
 | 6 | **Cruce BC / pedidos** — enlace por lote; ventas ILE; pedido desde albaran | Confirmada (implementada) |
 | 7 | Stock inventario / arrastre | Pendiente |
-| 8 | **Balance BC E/G** — stock kg/cajas: Producción (Salidas CAJA)=alta stock por coincidencia de lote; 1ª salida; merma peso Innova−BC; auditoría ILE | Confirmada (implementada) |
+| 8 | **Balance BC E/G/Z** — stock kg/cajas: teórico = inicial + Innova CAJA − 1ª salida; CHECK/desvío = real − teórico; estados A/B/C en cajas; Item No. BC prioriza; merma peso; auditoría ILE | Confirmada (implementada) |
 
 > Proyecto operativo / cerrado documentalmente: ver **INSTRUCCIONES.md** (checklist de cierre). Premisa 7 (arrastre inventario) sigue pendiente de negocio.
 
@@ -422,10 +422,10 @@ Objetivo: si BC se consume por **API** (sin campos custom `[Fecha empaque]` / `[
 | Campo necesario en balance / stock | Origen preferido (hibrido) | Origen actual (SQL BC) |
 |------------------------------------|----------------------------|-------------------------|
 | Identificador lote | BC `Lot No.` / API `lotNumber` = Innova `proc_packs.number` | Igual |
-| Movimiento (venta / ajuste+) | BC API: Entry Type, Location E/G, Quantity, Posting Date | ILE SQL |
+| Movimiento (venta / ajuste+) | BC API: Entry Type, Location E/G/Z, Quantity, Posting Date | ILE SQL |
 | **Kg** | Innova `SUM(proc_packs.weight)` del lote | `ABS(ILE.[Kilos])` |
 | **Fecha empaque** | Innova `MIN(proc_packs.prday)` (CAJA, premisa 3) | `ILE.[Fecha empaque]` |
-| **Fecha despesque** | `vw_stolt.fdespesque` (si hay enlace al lote/material); si no, N/D | No usado hoy en balance E/G |
+| **Fecha despesque** | `vw_stolt.fdespesque` (si hay enlace al lote/material); si no, N/D | No usado hoy en balance E/G/Z |
 
 **Alcance:** solo lotes CAJA Innova con `number` informado. Lotes solo presentes en BC (stock antiguo sin pack Innova) no tendran `prday`/`weight`.
 
@@ -507,7 +507,7 @@ LEFT JOIN doc_order sl ON sl.document_no = ile.[Document No.]
 WHERE ile.[Posting Date] >= @start
   AND ile.[Posting Date] < DATEADD(day, 1, @end)
   AND ile.[Entry Type] = 1
-  AND ile.[Location Code] IN ('E', 'G')
+  AND ile.[Location Code] IN ('E', 'G', 'Z')
   AND NULLIF(LTRIM(RTRIM(ile.[Lot No.])), '') IS NOT NULL
 GROUP BY CAST(ile.[Lot No.] AS varchar(50))
 ORDER BY lot;
@@ -552,18 +552,18 @@ Cifras orientativas del cruce anterior (~87 % lotes enlazados). Regenerar con pr
 
 ---
 
-## Premisa 8 — Balance BC almacenes E y G
+## Premisa 8 — Balance BC almacenes E, G y Z
 
-Balance de masa en Business Central para **Location Code E y G** unicamente.
+Balance de masa en Business Central para **Location Code E, G y Z**.
 
 ### Producción (Salidas CAJA) — definición canónica
 
-En el balance BC E/G, **Producción (Salidas CAJA)** es la **alta de stock** en E/G (no es una salida de almacén BC).
+En el balance BC E/G/Z, **Producción (Salidas CAJA)** es la **alta de stock** en E/G/Z (no es una salida de almacén BC).
 
 | | Definición |
 |--|------------|
-| **Qué es** | Cajas/lotes que ese día **entran** a stock E/G porque Innova las dio como salida CAJA |
-| **Coincidencia** | Mismo código de lote: Innova `proc_packs.number` = BC `Lot No.` en ILE E/G |
+| **Qué es** | Cajas/lotes que ese día **entran** a stock E/G/Z porque Innova las dio como salida CAJA |
+| **Coincidencia** | Mismo código de lote: Innova `proc_packs.number` = BC `Lot No.` en ILE E/G/Z |
 | **Fecha** | Innova `prday` = BC `[Fecha empaque]` |
 | **Cajas** | **1 lote = 1 caja** |
 | **Kg** | Peso del lote (Innova `weight` y/o BC `[Kilos]`) |
@@ -577,27 +577,31 @@ En el balance BC E/G, **Producción (Salidas CAJA)** es la **alta de stock** en 
 | Transferencia (Type 4) | No cuenta como producción ni como salida de stock |
 | Merma peso (Innova − BC) | Desvío de báscula; **no** altera el teórico ni el check |
 | Merma TINA (premisa 5) | Otro balance (proceso); no es esto |
-| Solo Innova sin lote en BC | No entra en producción del balance E/G |
+| Solo Innova sin lote en BC | No entra en producción del balance E/G/Z |
 | Solo BC sin CAJA Innova (API híbrida) | No entra (hace falta coincidencia de lote) |
 
-Con **API híbrida** (`BC_SOURCE=api`): producción = lotes con `prday` en el periodo **y** presentes en ILE E/G.  
+Con **API híbrida** (`BC_SOURCE=api`): producción = lotes con `prday` en el periodo **y** presentes en ILE E/G/Z.  
 Con **SQL BC**: la base de empaque puede salir de `[Fecha empaque]` en E/G; el enlace Innova se usa para tipología y merma peso.
 
 ### Reglas principales
 
 | Concepto | Definicion |
 |----------|------------|
-| **Stock inicial (dia)** | Lotes con producción anterior al dia; primera salida ese dia o posteriores |
-| **Stock final teorico** | **Stock inicial + Producción (Salidas CAJA) − Primera salida** (igual en **kg** y en **cajas**) |
-| **Stock final real** | Lotes con producción hasta ese dia y sin primera salida hasta ese dia (kg del lote; 1 lote = 1 caja) |
-| **Encadenamiento** | Stock final teorico del dia N = stock inicial del dia N+1 |
-| **Producción (Salidas CAJA)** | Alta stock E/G por coincidencia de lote Innova CAJA ∩ BC ILE (ver definición canónica arriba) |
+| **Stock inicial (dia)** | Lotes con empaque **anterior** al dia; sin venta ni ajuste negativo (Type 1/3) **antes** de ese dia (salida ese dia o despues, o sin salida) |
+| **Stock final teorico** | **Stock inicial BC + Producción Innova CAJA − Primera salida BC** (igual en **kg** y en **cajas**) |
+| **Stock final real** | Snapshot BC E/G/Z: empaque **hasta** ese dia y sin Type 1/3 hasta ese dia (incluye arrastre; kg del lote; 1 lote = 1 caja) |
+| **Encadenamiento** | Stock final teorico del dia N = stock inicial teorico del dia N+1 |
+| **Producción (Salidas CAJA)** | Teórico = **todas** las Salidas CAJA Innova. Comparativa aparte: Innova CAJA vs altas/empaque BC E/G/Z |
 | **Primera salida** | Primera venta o ajuste negativo del lote (Entry Type 1 o 3) ese dia — **una sola vez** |
 | **Ajustes negativos** | ILE `[Entry Type] = 3`: con Type 1 definen la **primera salida** del lote. No restan `ABS(Quantity)` aparte en el balance de stock |
-| **Stock apertura** | Producción anterior al periodo sin venta previa en E/G |
-| **Check** | Stock final teorico − Stock final real (**0 por construccion** en kg y cajas) |
-| **Merma peso (Innova - BC)** | Kg Innova enlazado − kg BC del mismo lote (desvio de bascula; **no** entra en el check de stock) |
-| **Alcance check** | Solo lotes con empaque o movimiento ILE en el mes del periodo |
+| **Stock apertura** | Producción anterior al periodo sin venta previa en E/G/Z |
+| **Desvío kg** | **Stock real BC − Stock teorico**. `%` = desvío / teorico × 100. Semáforo: verde ≤0,5%; amarillo ≤1%; rojo >1% (teorico=0 y real≠0 → rojo) |
+| **CHECK cajas** | Por producto y global: **real − teórico**. 0 = cuadrado; &lt;0 falta real; &gt;0 exceso real |
+| **Estado cajas A/B/C** | **A** total=0 y todos CHECK=0 (verde). **B** total=0 con algún CHECK≠0 → «Desvío por producto compensado» (amarillo). **C** total≠0 (rojo) |
+| **Producto (Innova→BC)** | Si el lote está en ILE → **Item No. BC**. Conversion solo si el lote es solo-Innova |
+| **Pares ±X** | Productos con CHECK opuesto de la misma magnitud: posible mapeo distinto; no ocultan el detalle |
+| **Merma peso (Innova - BC)** | Kg Innova enlazado − kg BC del mismo lote (desvio de bascula; **no** sustituye el desvío de stock) |
+| **Alcance desvío** | Por producto y etapa (Inicial / Producción / Salidas / Ajustes / Stock final) |
 | **Historico ILE** | Consultas acotadas desde **2026-01-01** (`[Posting Date]` / `[Fecha empaque]`) para evitar timeout en BC |
 
 ### Fines de semana y festivos
@@ -615,9 +619,9 @@ La tabla del informe incluye **todos los dias del mes** (laborables y fines de s
 | Nivel | Clave | Campos |
 |-------|-------|--------|
 | **Tipo producto** | ILE `[Item No.]` (prioridad) | Fallback: Conversion `Cod. bascula` = material Innova; luego `pattern` |
-| **Balance por tipo (cajas)** | Por `[Item No.]` / Cod. producto | Stock = Producción (Salidas CAJA) / 1ª salida (1 lote = 1 caja) |
+| **Balance por tipo (cajas)** | Por `[Item No.]` / Cod. producto | CHECK = real − teórico; estados A/B/C; Item No. BC prioriza sobre conversion |
 | **Movimientos ILE (auditoría)** | Por `[Item No.]` | `Inicial + Type 2 − Type 1 − Type 3` con `ABS(Quantity)` y `ABS(Kilos)`; check puede ≠ 0 |
-| **Item BC** | `[Item No.]` / `[Description]` en ILE | Fuente principal del desglose stock/balance E/G |
+| **Item BC** | `[Item No.]` / `[Description]` en ILE | Fuente principal del desglose stock/balance E/G/Z |
 | **Conversion** | `bc.[Conversion productos]` | Solo si el lote no trae Item No. |
 | **Pattern Innova** | `proc_materials.pattern` | Respaldo si no hay Item No. ni Conversion |
 
@@ -630,7 +634,7 @@ La tabla del informe incluye **todos los dias del mes** (laborables y fines de s
 | **Cod. producto (Conversion)** | `bc.[Conversion productos].[Cod. producto]` — no sobrescribe Item No. del lote |
 | **Pattern Innova** | `proc_materials.pattern` — respaldo si no hay Item No. ni Conversion |
 
-> **2026-08-05:** el desglose por producto de stock E/G prioriza `[Item No.]` del lote (no Conversion). Detalle en [docs/CAMBIOS_LOCAL.md](docs/CAMBIOS_LOCAL.md).
+> **Producto:** stock E/G/Z y balance por tipo priorizan `[Item No.]` del lote en ILE; Conversion solo si el lote no está en BC.
 
 **Unidades en cajas (pestaña Balance por tipo):**
 
@@ -639,28 +643,44 @@ La tabla del informe incluye **todos los dias del mes** (laborables y fines de s
 - **Ajustes negativos** = movimientos ILE Type 3 (columna informativa).
 - **Stock teorico** = Stock inicial + Producción (Salidas CAJA) − Primera salida (misma linea de vida que el stock real / check kg).
 - **Encadenamiento:** stock final teorico dia N = stock inicial dia N+1.
-- Check = teorico − real.
+- **CHECK** = real − teórico (0 = cuadrado; &lt;0 falta real; &gt;0 exceso real).
 
-### Pestañas Stock inicial / Stock final BC E/G (por tipo)
+### Pestañas Stock inicial / Stock final BC E/G/Z (por tipo)
 
-Almacenes **E** y **G**. Agregado por Cod. producto / `[Item No.]` en **cajas** (1 lote = 1 caja) y **kg**.
+Almacenes **E**, **G** y **Z**. Agregado por Cod. producto / `[Item No.]` en **cajas** (1 lote = 1 caja) y **kg**.
 
 | Pestaña | Fecha de referencia | Definicion |
 |---------|---------------------|------------|
-| **Stock inicial BC E/G** | Fecha **inicio** del informe | Producción **anterior** a la fecha inicio; venta/salida ese dia o posterior (o sin venta) |
-| **Stock final BC E/G** | Fecha **fin** del informe | Producción **dentro del periodo** (inicio–fin) y **sin venta hasta el fin** (pendiente de venta al mes siguiente) |
+| **Stock inicial BC E/G/Z** | Fecha **inicio** del informe | Empaque **anterior** al inicio; sin venta/ajuste neg. (Type 1/3) antes del inicio |
+| **Stock final BC E/G/Z** | Fecha **fin** del informe | Empaque **≤ fin** y sin Type 1/3 hasta el fin (arrastre + producción del periodo aún sin vender) |
 
-Ejemplo abril 2026: stock inicial al **01/04/2026**; stock final = producción en abril aún sin vender al **30/04/2026** (queda pendiente para mayo).
+Misma definición en **diario, semanal y mensual** (solo cambian las fechas inicio/fin del informe).
+
+En **Balance BC E/G/Z**: teórico = inicial BC + Innova CAJA − primera salida; real = snapshot BC; desvío kg = real − teórico con semáforo ±0,5% / ±1%.
+
+En **Balance por tipo (cajas)**: CHECK = real − teórico. Estados **A** (correcto), **B** (total 0 pero productos con CHECK ≠ 0: desvío por producto compensado), **C** (total ≠ 0). Producto: Item No. BC si el lote está en ILE; conversion solo para solo-Innova. Los pares ±X se listan aparte sin ocultar el detalle.
 
 ### Acceso multi-usuario Innova
 
 Login SQL solo-lectura para el informe: script `scripts/crear_usuario_innova_biomasa.py` (usuario por defecto `biomasa_ro`, rol `db_datareader`). Cada puesto guarda su `DB_USER`/`DB_PASSWORD` en `.env`. Ver README.
 
-En la pestaña **Balance BC E/G** el desglose es por **tipo de producto** (sin tabla de detalle por lote, para mantener el informe ligero). La nota de ajustes negativos Type 3 aparece **una sola vez** al pie global del informe.
+En la pestaña **Balance BC E/G/Z** el desglose es por **tipo de producto** (sin tabla de detalle por lote en periodos largos, para mantener el informe ligero). La nota de ajustes negativos Type 3 aparece **una sola vez** al pie global del informe.
+
+### Pestaña Lotes del dia (solo informe de 1 dia)
+
+Si **fecha inicio = fecha fin**, el informe incluye la pestaña **Lotes del dia** con:
+
+| Grupo | Significado |
+|-------|-------------|
+| **Coinciden** | Mismo lote en Innova CAJA y en BC E/G/Z |
+| **Solo Innova** | Salida CAJA sin lote en ILE E/G/Z |
+| **Solo BC** | Movimiento BC (empaque o 1ª salida ese dia) sin CAJA Innova |
+
+Si el periodo es **semana o mes** (inicio ≠ fin), esa pestaña **no se genera**.
 
 ### Pestaña Análisis ILE (1/2/3)
 
-Validación de movimientos ILE en almacenes **E/G** (`Entry Type` 1 = venta, 2 = ajuste +, 3 = ajuste −):
+Validación de movimientos ILE en almacenes **E/G/Z** (`Entry Type` 1 = venta, 2 = ajuste +, 3 = ajuste −):
 
 | Bloque | Contenido |
 |--------|-----------|
@@ -694,7 +714,7 @@ Stock inventario cierre = Stock inicial + Entradas TINA − Tinas procesadas
 - Premisa **stock inventario / arrastre** entre meses (premisa 7)
 - Actualizar arrastre CLI para usar stock de tinas en encadenamiento
 
-> Premisa 8 (Balance BC E/G) documentada arriba; mantener alineada con `PREMISA_BC_BALANCE_EG_REGLAS`.
+> Premisa 8 (Balance BC E/G/Z) documentada arriba; mantener alineada con `PREMISA_BC_BALANCE_EG_REGLAS`.
 
 ## Mantenimiento
 

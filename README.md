@@ -141,11 +141,11 @@ Opcional futuro: autenticacion Windows (`Trusted_Connection`) para no guardar pa
 4. **Detalle diario** — tabla día a día  
 5. **Balance** — entradas, salidas, stock y merma  
 6. **Cruce BC** — Innova ↔ ILE por lote (`number` = `[Lot No.]`)  
-7. **Balance BC E/G** — Inicial + Producción (Salidas CAJA) − 1ª salida; merma peso Innova−BC  
-8. **Balance por tipo (cajas)** — Producción = alta stock por coincidencia lote Innova∩BC (1 lote = 1 caja)  
+7. **Balance BC E/G/Z** — Inicial + Producción (Salidas CAJA) − 1ª salida; merma peso Innova−BC  
+8. **Balance por tipo (cajas)** — CHECK = real − teórico; estados A/B/C; Item No. BC si el lote está en ILE (1 lote = 1 caja)  
 9. **Movimientos ILE (T2/1/3)** — auditoría `ABS(Quantity)` / `ABS(Kilos)`  
-10. **Stock inicial BC E/G** — cajas y kg por tipo a la fecha de inicio  
-11. **Stock final BC E/G** — producción del periodo pendiente de venta a la fecha de fin  
+10. **Stock inicial BC E/G/Z** — cajas y kg por tipo a la fecha de inicio  
+11. **Stock final BC E/G/Z** — producción del periodo pendiente de venta a la fecha de fin  
 12. **Análisis ILE (1/2/3)** — Type 1/2/3 por usuario/día/producto  
 13. **Materiales** — top entradas / salidas  
 14. **Debug** — trazas SQL (opcional)
@@ -162,7 +162,7 @@ Manual completo: **[INSTRUCCIONES.md](INSTRUCCIONES.md)**.
 |---------|-----|--------|
 | **TINA** | Entrada de biomasa | `proc_packs` · `pkpackaging = 3` |
 | **CAJA** | Salida de producto (proceso) | `proc_packs` · `pkpackaging <> 3` |
-| **Producción (Salidas CAJA)** | En balance BC E/G: **alta de stock** E/G por coincidencia de lote Innova∩BC | `number`/`prday` = `Lot No.`/`Fecha empaque` |
+| **Producción (Salidas CAJA)** | En balance BC E/G/Z: **alta de stock** E/G por coincidencia de lote Innova∩BC | `number`/`prday` = `Lot No.`/`Fecha empaque` |
 | **TINA procesada** | Consumo de tina (no es salida CAJA) | `proc_matxacts` |
 
 Identidad visual: azul navy / cian / rojo logo Stolt Sea Farm.
@@ -213,7 +213,7 @@ Detalle completo en **[PREMISAS.md](PREMISAS.md)**.
 | 4 | Merma | Entradas TINA − Salidas CAJA − Stock de tinas |
 | 5 | TINA procesada | `proc_matxacts` · fecha = `regtime` de la tina |
 
-### Balance BC E/G (kg)
+### Balance BC E/G/Z (kg)
 
 `Stock teórico = Stock inicial + Salidas Innova − Ventas BC`  
 Almacenes **E/G**. Histórico ILE desde **2026-01-01**. Encadenamiento: cierre día N = apertura día N+1.
@@ -274,7 +274,7 @@ Con el entorno ya creado:
 | Stock de tinas | 225.334,24 kg |
 | Merma | −44.703,21 kg (−6,83 %) |
 | Cruce BC lotes | 69.767 / 77.531 (89,99 %) |
-| Balance BC E/G (check) | −568,49 kg |
+| Balance BC E/G/Z (check) | −568,49 kg |
 | Balance por tipo cajas | Entradas 78.674 · Ventas 76.278 · Check −145 |
 
 ### Abril 2026
@@ -287,7 +287,7 @@ Con el entorno ya creado:
 | Stock de tinas | 169.158,75 kg |
 | Merma | −61.428,15 kg (−11,85 %) |
 | Cruce BC lotes | 66.384 / 71.174 (93,27 %) |
-| Balance BC E/G (check) | −70,56 kg |
+| Balance BC E/G/Z (check) | −70,56 kg |
 | Balance por tipo cajas | Inicial 6.829 · Entradas 74.352 · Ventas 73.320 · Ajustes neg. 3.884 · Teórico 3.977 · Real 4.205 · Check **−228** |
 | Análisis Type 3 | 3 usuarios · top **ACZ** · ~98 % movimientos Type 3 con Kilos=0 |
 

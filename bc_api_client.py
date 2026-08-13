@@ -309,7 +309,7 @@ class BcIleApiClient:
         start: date,
         end: date,
         *,
-        locations: tuple[str, ...] = ("E", "G"),
+        locations: tuple[str, ...] = ("E", "G", "Z"),
         verbose: bool = True,
     ) -> list[dict[str, Any]]:
         transport = self.resolve_transport()
@@ -367,5 +367,5 @@ class BcIleApiClient:
                 continue
             normalized.append(row)
         if verbose:
-            print(f"  BC API normalizado Type 1/2/3 E/G: {len(normalized):,}")
+            print(f"  BC API normalizado Type 1/2/3 E/G/Z: {len(normalized):,}")
         return normalized

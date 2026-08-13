@@ -72,7 +72,7 @@ def main() -> None:
     # Sample filter Location E or G in April 2026
     filt = (
         "Posting_Date ge 2026-04-01 and Posting_Date le 2026-04-30 "
-        "and (Location_Code eq 'E' or Location_Code eq 'G')"
+        "and (Location_Code eq 'E' or Location_Code eq 'G' or Location_Code eq 'Z')"
     )
     url = (
         f"{base}/{company_path}/ItemLedgerEntries"

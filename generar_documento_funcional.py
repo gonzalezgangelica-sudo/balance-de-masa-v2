@@ -87,7 +87,7 @@ def build_document(output_path: Path) -> None:
             ["Innova (SQL Server)", "dbo.proc_packs + dbo.proc_materials", "Entradas, salidas, stock/merma por regtime"],
             ["Innova", "dbo.proc_matxacts + dbo.proc_packs", "Kg cajas = consumo TINA; fecha diaria = regtime de la tina (pack = proc_packs.id)"],
             ["Innova", "dbo.vw_stolt", "Arrastre stock sin procesar (fdespesque)"],
-            ["Business Central (Azure SQL)", "bc.[Item Ledger Entry]", "Ventas, ajustes +/−, stock E/G; campo [Kilos] / Quantity"],
+            ["Business Central (Azure SQL)", "bc.[Item Ledger Entry]", "Ventas, ajustes +/−, stock E/G/Z; campo [Kilos] / Quantity"],
             ["Business Central", "bc.[Sales Shipment Line]", "Pedido ([Order No.]) del albaran"],
             ["Business Central", "bc.[Conversion productos]", "Cod. bascula Innova → Cod. producto BC"],
         ],
@@ -156,10 +156,11 @@ def build_document(output_path: Path) -> None:
         [
             "Introduccion, Resumen, Graficas, Detalle diario, Balance (stock/merma)",
             "Cruce BC por lote (number = Lot No.)",
-            "Balance BC E/G: Inicial + Produccion (Salidas CAJA) − Primera salida "
-            "(Produccion = alta stock por coincidencia lote Innova∩BC)",
-            "Balance por tipo en cajas: Inicial + Type 2 − Type 1 − Type 3",
-            "Stock inicial / Stock final BC E/G por producto",
+            "Balance BC E/G/Z: Inicial + Produccion (Salidas CAJA) − Primera salida; "
+            "desvio kg = real − teorico",
+            "Balance por tipo (cajas): CHECK = real − teorico; estados A/B/C; "
+            "Item No. BC si lote en ILE",
+            "Stock inicial / Stock final BC E/G/Z por producto",
             "Analisis ILE (1/2/3): validacion de ecuacion y Type 3 por usuario/dia/producto",
             "Materiales y Debug (SQL)",
             "Pie unico: nota VAP + nota ajustes negativos Type 3",
@@ -173,7 +174,7 @@ def build_document(output_path: Path) -> None:
             "Detalle diario de produccion",
             "Entradas, salidas, stock y merma",
             "Cruce Innova / BC por lote (number / Lot No.)",
-            "Balances BC E/G (kg y cajas) y analisis ILE",
+            "Balances BC E/G/Z (kg y cajas) y analisis ILE",
             "Top 15 materiales de entrada y de salida",
             "Exportacion global en un unico libro Excel",
         ],
@@ -210,7 +211,7 @@ def build_document(output_path: Path) -> None:
             ["Stock de tinas", "169.158,75 kg"],
             ["Merma", "−61.428,15 kg (−11,85 %)"],
             ["Cruce BC lotes", "66.384 / 71.174 (93,27 %)"],
-            ["Balance BC E/G (check kg)", "−70,56 kg"],
+            ["Balance BC E/G/Z (check kg)", "−70,56 kg"],
             ["Balance cajas", "Ini 6.829 · Ent 74.352 · Ven 73.320 · Adj− 3.884 · Check −228"],
             ["Analisis Type 3", "3 usuarios · top ACZ · muchos Type 3 con Kilos=0"],
         ],

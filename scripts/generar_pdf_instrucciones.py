@@ -131,7 +131,7 @@ def build_full_pdf(path: Path) -> None:
     pdf.h2("1. Qué hace el proyecto")
     pdf.body(
         "Genera un informe HTML del periodo que combina Innova (TINA/CAJA/stock/merma) "
-        "y Business Central (cruce por lote, balance almacenes E/G, movimientos ILE)."
+        "y Business Central (cruce por lote, balance almacenes E/G/Z, movimientos ILE)."
     )
     pdf.body("Salida: Reports/reporte_biomasa_YYYYMMDD_YYYYMMDD.html (exportable a Excel).")
 
@@ -202,12 +202,13 @@ def build_full_pdf(path: Path) -> None:
     pdf.body("Flujo resumido (sin diagrama):")
     pdf.bullet("Innova → KPIs biomasa (premisas 1–5).")
     pdf.bullet(
-        "BC ILE E/G (API/OData) → movimientos Type 1/2/3; enrich lote con Innova prday/weight."
+        "BC ILE E/G/Z (API/OData) → movimientos Type 1/2/3; enrich lote con Innova prday/weight."
     )
-    pdf.bullet("Cruce: proc_packs.number = Lot No. (almacenes E y G).")
+    pdf.bullet("Cruce: proc_packs.number = Lot No. (almacenes E, G y Z).")
     pdf.bullet(
         "Stock oficial: Inicial + Produccion (Salidas CAJA) − Primera salida "
-        "(Produccion = alta stock E/G por coincidencia lote Innova∩BC; check kg/cajas alineados)."
+        "(Produccion = alta stock E/G/Z por coincidencia lote Innova∩BC; "
+        "CHECK cajas = real − teorico; estados A/B/C)."
     )
     pdf.bullet(
         "Auditoría ILE: Inicial + T2 − T1 − T3 con ABS(Quantity)/ABS(Kilos) (check puede ≠ 0)."
@@ -233,7 +234,7 @@ def build_full_pdf(path: Path) -> None:
             ["Detalle diario", "Tabla + Excel"],
             ["Balance", "Stock tinas, merma"],
             ["Cruce BC", "Lotes Innova ↔ BC"],
-            ["Balance BC E/G", "Produccion=alta stock Innova∩BC"],
+            ["Balance BC E/G/Z", "Produccion=alta stock Innova∩BC"],
             ["Balance por tipo (cajas)", "Produccion (Salidas CAJA) / 1ª salida"],
             ["Movimientos ILE (T2/1/3)", "Auditoría Quantity/Kilos"],
             ["Stock inicial/final BC", "Snapshot por producto"],
@@ -247,7 +248,7 @@ def build_full_pdf(path: Path) -> None:
     pdf.table(
         ["", "Balance almacén", "Movimientos ILE"],
         [
-            ["Pestañas", "BC E/G + tipo cajas", "Movimientos ILE"],
+            ["Pestañas", "BC E/G/Z + tipo cajas", "Movimientos ILE"],
             ["Unidad", "1 lote = 1 caja / kg lote", "ABS(Quantity/Kilos)"],
             ["Fórmula", "Ini + Produccion (Salidas CAJA) − 1ª salida", "Ini + T2 − T1 − T3"],
             ["Check abril", "0", "Cajas +71 (esperado)"],
@@ -310,7 +311,7 @@ def build_quick_pdf(path: Path) -> None:
         ["Pestaña", "Para qué"],
         [
             ["Resumen", "KPIs TINA / CAJA / merma"],
-            ["Balance BC E/G", "Check stock en kg (debe ~0)"],
+            ["Balance BC E/G/Z", "Check stock en kg (debe ~0)"],
             ["Balance por tipo (cajas)", "Stock por producto (lote=caja)"],
             ["Movimientos ILE", "Auditoría apuntes Type 2/1/3"],
             ["Cruce BC", "Lotes Innova ↔ BC"],

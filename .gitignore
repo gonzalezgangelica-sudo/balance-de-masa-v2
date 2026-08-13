@@ -27,6 +27,9 @@ CREDENCIALES*.md
 docs/CREDENCIALES*.md
 **/CREDENCIALES_LOCAL.md
 
+# Paquetes por usuario (contienen .env)
+distribucion/
+
 # Salidas / temporales locales
 output/
 ~$*

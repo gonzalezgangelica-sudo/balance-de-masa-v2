@@ -1,4 +1,4 @@
-"""Fetch BC ILE via API + enriquecimiento Innova (prday/weight) y agregacion balance E/G.
+"""Fetch BC ILE via API + enriquecimiento Innova (prday/weight) y agregacion balance E/G/Z.
 
 Reproduce la estructura de retorno de fetch_bc_balance_eg / fetch_bc_salidas_pedido
 sin depender de campos custom SQL ([Kilos], [Fecha empaque], [Id. usuario]) cuando
@@ -228,6 +228,78 @@ def _lot_agg(
     return [by_lot[k] for k in sorted(by_lot)]
 
 
+def build_lots_stock_vivo_from_ile(
+    rows: list[dict[str, Any]],
+    lot_meta: dict[str, dict[str, Any]],
+    end: dt.date,
+) -> list[dict[str, Any]]:
+    """Universo de lotes en almacén E/G/Z para stock real: empaque <= fin, con 1ª salida.
+
+    Incluye empacados antes del periodo aún sin vender (arrastre), no solo el periodo.
+    """
+    by_lot: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        lot = str(row.get("lot") or "").strip()
+        if not lot:
+            continue
+        slot = by_lot.setdefault(
+            lot,
+            {
+                "lot": lot,
+                "fe_empaque": None,
+                "kg": 0.0,
+                "first_out": None,
+                "first_sale": None,
+                "item_no": "",
+                "item_description": "",
+            },
+        )
+        fe = row.get("fecha_empaque")
+        if fe is not None and (slot["fe_empaque"] is None or fe < slot["fe_empaque"]):
+            slot["fe_empaque"] = fe
+        if row.get("entry_type") in (1, 3):
+            pd = row.get("posting_date")
+            if pd is not None and (slot["first_out"] is None or pd < slot["first_out"]):
+                slot["first_out"] = pd
+                slot["first_sale"] = pd
+        if row.get("lot_kg"):
+            slot["kg"] = to_float(row["lot_kg"])
+        elif to_float(row.get("kilos")) > slot["kg"]:
+            slot["kg"] = abs(to_float(row.get("kilos")))
+        if row.get("item_no") and not slot["item_no"]:
+            slot["item_no"] = str(row.get("item_no") or "")
+        if row.get("item_description") and not slot["item_description"]:
+            slot["item_description"] = str(row.get("item_description") or "")
+
+    for lot, meta in (lot_meta or {}).items():
+        lot = str(lot or "").strip()
+        if not lot:
+            continue
+        prday = _as_date(meta.get("prday_min"))
+        kg = to_float(meta.get("kg"))
+        slot = by_lot.get(lot)
+        if slot is None:
+            if prday is None or prday > end:
+                continue
+            # Solo si el lote aparece en ILE (ya en by_lot). Si no, no inventar stock.
+            continue
+        if prday is not None and (slot["fe_empaque"] is None or prday < slot["fe_empaque"]):
+            slot["fe_empaque"] = prday
+        if kg > 0:
+            slot["kg"] = kg
+
+    vivo: list[dict[str, Any]] = []
+    for lot in sorted(by_lot):
+        slot = by_lot[lot]
+        fe = slot.get("fe_empaque")
+        if fe is None or fe > end:
+            continue
+        if fe < BC_ILE_HISTORY_FROM:
+            continue
+        vivo.append(slot)
+    return vivo
+
+
 def build_balance_from_ile(
     rows: list[dict[str, Any]],
     lot_meta: dict[str, dict[str, Any]],
@@ -236,7 +308,7 @@ def build_balance_from_ile(
     *,
     transport: str,
 ) -> dict[str, Any]:
-    """Agrega balance E/G equivalente a fetch_bc_balance_eg."""
+    """Agrega balance E/G/Z equivalente a fetch_bc_balance_eg."""
     ile_start = bc_ile_effective_start(start)
     period_rows = [
         r
@@ -292,8 +364,8 @@ def build_balance_from_ile(
         end=end,
     )
 
-    # Produccion (Salidas CAJA): lotes Innova con prday en periodo presentes en ILE E/G
-    # (alta stock E/G por coincidencia de lote; no es salida de almacen BC).
+    # Produccion (Salidas CAJA): lotes Innova con prday en periodo presentes en ILE E/G/Z
+    # (alta stock E/G/Z por coincidencia de lote; no es salida de almacen BC).
     ile_lots = {r["lot"] for r in period_rows if r["lot"]}
     first_out_by_lot: dict[str, dt.date] = {}
     item_by_lot: dict[str, tuple[str, str]] = {}
@@ -465,21 +537,43 @@ def build_balance_from_ile(
     sold_or_neg = {
         r["lot"] for r in period_rows if r["entry_type"] in (1, 3) and r["lot"]
     }
+    # Stock vivo = todos los lotes con empaque <= fin (incluye arrastre anterior al periodo).
+    lots_stock_vivo = build_lots_stock_vivo_from_ile(rows, lot_meta, end)
     unsold_lots = sorted(
         {
-            snap["lot"]
-            for snap in lot_snapshot
-            if snap["lot"] and snap["lot"] not in sold_or_neg
+            str(slot["lot"]).strip()
+            for slot in lots_stock_vivo
+            if slot.get("lot")
+            and (
+                slot.get("first_out") is None
+                or _as_date(slot.get("first_out")) is None
+                or _as_date(slot.get("first_out")) > end  # type: ignore[operator]
+            )
         }
     )
+    unsold_set = set(unsold_lots)
     kg_stock_final = sum(
-        to_float(snap["kg"]) for snap in lot_snapshot if snap["lot"] in set(unsold_lots)
+        to_float(slot["kg"]) for slot in lots_stock_vivo if str(slot["lot"]).strip() in unsold_set
     )
 
+    # Stock inicial diario: snapshot del periodo + arrastre (vivo con empaque < dia).
     stock_inicial_ile_diario = build_stock_inicial_ile_diario(
         start,
         end,
-        merge_lots_for_stock_inicial_ile(lot_snapshot, lots_stock_antiguo_mes),
+        merge_lots_for_stock_inicial_ile(
+            [
+                {
+                    "lot": s["lot"],
+                    "fe_empaque": s.get("fe_empaque"),
+                    "kg": s.get("kg"),
+                    "first_sale": s.get("first_out"),
+                    "item_no": s.get("item_no") or "",
+                    "item_description": s.get("item_description") or "",
+                }
+                for s in lots_stock_vivo
+            ],
+            lots_stock_antiguo_mes,
+        ),
     )
     kg_stock_inicial_apertura = 0.0
     lotes_stock_inicial_apertura = 0
@@ -499,6 +593,7 @@ def build_balance_from_ile(
         "lotes_empaque_mes_kg": lotes_empaque_mes_kg,
         "lot_snapshot": lot_snapshot,
         "lots_stock_antiguo_mes": lots_stock_antiguo_mes,
+        "lots_stock_vivo": lots_stock_vivo,
         "lotes_apertura": [],
         "ventas_por_lote": ventas_por_lote,
         "entradas_pos_adj_por_lote": entradas_pos_adj_por_lote,
@@ -532,7 +627,8 @@ def build_balance_from_ile(
                 {
                     "name": "bc_api_ile_eg_hybrid",
                     "query": (
-                        "API/OData ItemLedgerEntries E/G + enrich Innova prday/weight"
+                        "API/OData ItemLedgerEntries E/G/Z desde historico ILE + enrich Innova "
+                        "(stock vivo = empaque<=fin sin 1a salida)"
                     ),
                 }
             ],
@@ -654,7 +750,7 @@ def fetch_bc_salidas_pedido_api(
     if ile_rows is None:
         client = BcIleApiClient()
         if verbose:
-            print("  Descargando ILE E/G via API/OData (cruce)...")
+            print("  Descargando ILE E/G/Z via API/OData (cruce)...")
         raw = client.fetch_ile_eg(start, end, verbose=verbose)
         transport = client.transport or transport
         lots = {r["lot"] for r in raw if r.get("lot")}
@@ -670,10 +766,20 @@ def download_ile_eg_api(
     *,
     verbose: bool = True,
 ) -> tuple[list[dict[str, Any]], str]:
+    """Descarga ILE desde historico (no solo el periodo) para stock vivo al cierre.
+
+    `start` se conserva en la firma (periodo del informe); el posting se pide desde
+    `BC_ILE_HISTORY_FROM` hasta `end` para incluir arrastre empacado antes del periodo.
+    """
+    ile_from = BC_ILE_HISTORY_FROM
     client = BcIleApiClient()
     if verbose:
-        print("  Descargando ILE E/G via API/OData...")
-    raw = client.fetch_ile_eg(start, end, verbose=verbose)
+        print(
+            f"  Descargando ILE E/G/Z via API/OData "
+            f"({ile_from.isoformat()}..{end.isoformat()}; "
+            f"periodo informe {start.isoformat()}..{end.isoformat()})..."
+        )
+    raw = client.fetch_ile_eg(ile_from, end, verbose=verbose)
     return raw, client.transport or "api"
 
 

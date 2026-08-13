@@ -153,15 +153,17 @@ flowchart LR
 ### Flujo de datos
 
 1. **Innova:** KPIs de biomasa (premisas 1–5, 7) por `prday` / stock de tinas / merma.
-2. **BC ILE E/G:** con `BC_SOURCE=api`, descarga movimientos Type 1/2/3 (OAuth), enriquece lote con Innova (`prday`, `weight`).
-3. **Cruce:** `proc_packs.number` = `Lot No.` (almacenes E y G).
+2. **BC ILE E/G/Z:** con `BC_SOURCE=api`, descarga movimientos Type 1/2/3 (OAuth), enriquece lote con Innova (`prday`, `weight`).
+3. **Cruce:** `proc_packs.number` = `Lot No.` (almacenes E, G y Z).
 4. **Balances:**
-   - **Stock (oficial):** Inicial + Producción (Salidas CAJA) − Primera salida → check kg/cajas alineados.
-     - **Producción (Salidas CAJA)** = alta de stock E/G por **coincidencia de lote** Innova CAJA ∩ BC ILE
+   - **Stock (oficial):** teórico = Inicial + Producción (Salidas CAJA) − Primera salida.
+     Desvío kg / CHECK cajas = **real − teórico**.
+     - **Producción (Salidas CAJA)** = alta de stock E/G/Z por **coincidencia de lote** Innova CAJA ∩ BC ILE
        (`proc_packs.number` = `Lot No.`; `prday` = `Fecha empaque`). 1 lote = 1 caja. **No** es salida de almacén BC.
      - **Merma peso (Innova − BC)** = desvío de báscula; no entra en el check de stock.
-   - **Producto (stock inicial/final y balance por tipo):** prioridad **`Item No.`** del lote en ILE;
-     `Conversion productos` solo si el lote no trae Item No. (evita etiquetas distintas entre stock inicial y final).
+   - **Producto (stock inicial/final y balance por tipo):** si el lote está en ILE → **`Item No.` BC**;
+     Conversion solo para lotes solo-Innova.
+   - **Cajas A/B/C:** A = total 0 y todos CHECK=0 (verde); B = total 0 con algún CHECK≠0 («Desvío por producto compensado», amarillo); C = total ≠ 0 (rojo). Pares ±X visibles sin ocultar el detalle.
    - **Movimientos ILE (auditoría):** Inicial + Type2 − Type1 − Type3 con `ABS(Quantity)` / `ABS(Kilos)` → el check puede ≠ 0.
 
 ### Módulos principales
@@ -187,8 +189,9 @@ flowchart LR
 | Detalle diario | Tabla día a día + Excel |
 | Balance | Stock tinas, merma, arrastre |
 | Cruce BC | Lotes Innova ↔ BC, con/sin pedido |
-| Balance BC E/G | Stock: Inicial + Producción (Salidas CAJA) − 1ª salida; merma peso Innova−BC |
-| Balance por tipo (cajas) | Misma lógica (1 lote = 1 caja; coincidencia Innova∩BC) |
+| Balance BC E/G/Z | Stock: Inicial + Producción (Salidas CAJA) − 1ª salida; merma peso Innova−BC |
+| **Lotes del dia** | **Solo si inicio=fin**: coinciden / solo Innova / solo BC (no en semana/mes) |
+| Balance por tipo (cajas) | CHECK = real − teórico; estados A/B/C; Item No. BC si lote en ILE |
 | **Movimientos ILE (T2/1/3)** | Auditoría Quantity/Kilos Type 2/1/3 |
 | Stock inicial / final BC | Snapshot por producto |
 | Análisis ILE | KPIs Type 3, gráficos, alertas |
@@ -201,10 +204,10 @@ flowchart LR
 
 | | **Balance de almacén** | **Movimientos ILE** |
 |--|------------------------|---------------------|
-| Pestañas | Balance BC E/G, Balance por tipo (cajas) | Movimientos ILE (T2/1/3) |
+| Pestañas | Balance BC E/G/Z, Balance por tipo (cajas) | Movimientos ILE (T2/1/3) |
 | Unidad | 1 lote = 1 caja / kg del lote | `ABS(Quantity)` / `ABS(Kilos)` |
-| Fórmula | Inicial + Producción (Salidas CAJA) − 1ª salida | Inicial + T2 − T1 − T3 |
-| Check típico abril | **0** | Cajas **+71** (esperado) |
+| Fórmula | Inicial + Producción (Salidas CAJA) − 1ª salida; CHECK/desvío = real − teórico | Inicial + T2 − T1 − T3 |
+| Check | Cajas: A/B/C (total y por producto). Kg: semáforo ±0,5% / ±1% | Puede ≠ 0 |
 | Uso | ¿Cuadra el stock? | ¿Qué apuntes hizo BC? |
 
 ---
@@ -216,7 +219,8 @@ flowchart LR
 | Error login Innova | Revisar `DB_*` en `.env`; VPN/red |
 | Error OAuth / BC API | Revisar `CLIENT_*`, `TENANT_ID`, `COMPANY_ID` |
 | Timeout BC SQL | Subir `BC_TIMEOUT` o usar `BC_SOURCE=api` |
-| Stock final con productos “cambiados” vs inicial | Regenerar con build ≥ 2026-08-05: el código usa **Item No. ILE**, no Conversion. Ver [docs/CAMBIOS_LOCAL.md](docs/CAMBIOS_LOCAL.md) |
+| Stock final con productos “cambiados” vs inicial | El código usa **Item No. ILE** si el lote está en BC; Conversion solo para solo-Innova |
+| Total cajas = 0 pero productos con CHECK ≠ 0 | Estado **B**: desvío por producto compensado; revisar pares ±X |
 | Check cajas ≠ 0 en Movimientos ILE | Normal (Quantity≠1, Type 1+3, Kilos=0) |
 | Check stock = 0 pero Movimientos ≠ 0 | Correcto: son lógicas distintas |
 | Sin HTML | Mirar `Reports\` o `logs\` |

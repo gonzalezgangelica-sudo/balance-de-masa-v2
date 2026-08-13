@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Contraste por lote: Innova (prday, weight, despesque) vs BC (Fecha empaque, Kilos).
 
-Une por proc_packs.number = ILE [Lot No.] (almacenes E/G).
+Une por proc_packs.number = ILE [Lot No.] (almacenes E/G/Z).
 Sirve para validar la premisa hibrida antes de migrar BC a API.
 
 Uso:
@@ -167,7 +167,7 @@ def fetch_innova_despesque_por_lote(
 def fetch_bc_lotes(
     conn: pymssql.Connection, start: dt.date, end: dt.date
 ) -> list[dict[str, Any]]:
-    """Lotes BC E/G con Fecha empaque en el periodo (contraste vs Innova CAJA)."""
+    """Lotes BC E/G/Z con Fecha empaque en el periodo (contraste vs Innova CAJA)."""
     q = f"""
     SELECT
       CAST(ile.[Lot No.] AS varchar(50)) AS lot,
@@ -311,7 +311,7 @@ def write_outputs(
         f"| Metrica | Valor |",
         f"|---------|-------|",
         f"| Lotes Innova CAJA (prday periodo) | {meta['n_innova']:,} |",
-        f"| Lotes BC E/G (Fecha empaque en periodo) | {meta['n_bc']:,} |",
+        f"| Lotes BC E/G/Z (Fecha empaque en periodo) | {meta['n_bc']:,} |",
         f"| En ambos | {len(both):,} |",
         f"| Solo Innova | {len(only_i):,} |",
         f"| Solo BC | {len(only_b):,} |",

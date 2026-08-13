@@ -4,7 +4,7 @@
 
 ## Por qué existe este documento
 
-Sirve para **no cometer el error** de basar el balance E/G en la API estándar v2.0 de Business Central.
+Sirve para **no cometer el error** de basar el balance E/G/Z en la API estándar v2.0 de Business Central.
 
 | Opción | ¿Sirve para biomasa E/G? | Motivo |
 |--------|--------------------------|--------|
@@ -12,7 +12,7 @@ Sirve para **no cometer el error** de basar el balance E/G en la API estándar v
 | ODataV4 `ItemLedgerEntries` | **Sí (actual)** | Trae lote y almacén; kilos/`prday` desde Innova |
 | API AL custom (futuro) | **Sí (ideal)** | Podría incluir `Id. usuario`, Kilos, Fecha empaque |
 
-Si alguien “migra a API v2.0” sin lote/almacén, el cruce y el balance E/G **dejarían de ser fiables**.
+Si alguien “migra a API v2.0” sin lote/almacén, el cruce y el balance E/G/Z **dejarían de ser fiables**.
 
 ## Qué usa el informe hoy
 
