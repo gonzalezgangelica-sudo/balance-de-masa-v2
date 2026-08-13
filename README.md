@@ -132,6 +132,7 @@ Opcional futuro: autenticacion Windows (`Trusted_Connection`) para no guardar pa
 | Informe HTML | `Reports/reporte_biomasa_YYYYMMDD_YYYYMMDD.html` (autocontenido) |
 | Excel | Export desde el navegador (detalle, stock/merma, cruce BC, balances, análisis ILE, materiales) |
 | Premisas | Reglas en `PREMISAS.md` y bloque visible en el informe |
+| Definiciones KPI | `docs/KPI_DEFINICIONES.md` (textos de ayuda fuera del informe) |
 
 ### Pestañas
 

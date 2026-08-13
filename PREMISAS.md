@@ -172,7 +172,7 @@ Kg y unidades de producto registrado como **salida en caja** en un dia de produc
 | Tipo movimiento | `p.rtype = 1` |
 | Fecha del dia | `p.prday` (medianoche) |
 | Kg | `SUM(p.weight)` |
-| Unidades | `COUNT(*)` — se reporta como **Nº de Cajas** |
+| Unidades | `COUNT(*)` — KPI Innova «Nº de Cajas» (filas pack). En el **balance BC** la unidad es **1 lote = 1 caja** (`number` / `Lot No.`), no este `COUNT(*)`. |
 
 No se usa `regtime`.
 
@@ -565,9 +565,20 @@ En el balance BC E/G/Z, **Producción (Salidas CAJA)** es la **alta de stock** e
 | **Qué es** | Cajas/lotes que ese día **entran** a stock E/G/Z porque Innova las dio como salida CAJA |
 | **Coincidencia** | Mismo código de lote: Innova `proc_packs.number` = BC `Lot No.` en ILE E/G/Z |
 | **Fecha** | Innova `prday` = BC `[Fecha empaque]` |
-| **Cajas** | **1 lote = 1 caja** |
+| **Cajas** | **1 lote = 1 caja** (regla de negocio del balance; ver abajo) |
 | **Kg** | Peso del lote (Innova `weight` y/o BC `[Kilos]`) |
 | **Efecto** | **Suma** en el teórico: `Inicial + Producción − Primera salida` |
+
+**Regla de negocio — 1 lote = 1 caja**
+
+En el balance BC E/G/Z y el CHECK de cajas, la unidad es el código de lote:
+
+- Innova: `proc_packs.number`
+- BC: ILE `[Lot No.]`
+
+Un lote cuenta **una** caja en teórico y en real. No se usa `COUNT(*)` de filas `proc_packs` (packs) como cajas del balance.
+
+Si un mismo `number` aparece más de una vez en Innova, el informe muestra la alerta **LOTE REPETIDO — REVISAR**. La repetición **no** incrementa las cajas del balance; hay que revisar si es duplicidad o un cambio del modelo de datos.
 
 **No es producción:**
 
@@ -596,10 +607,11 @@ Con **SQL BC**: la base de empaque puede salir de `[Fecha empaque]` en E/G; el e
 | **Ajustes negativos** | ILE `[Entry Type] = 3`: con Type 1 definen la **primera salida** del lote. No restan `ABS(Quantity)` aparte en el balance de stock |
 | **Stock apertura** | Producción anterior al periodo sin venta previa en E/G/Z |
 | **Desvío kg** | **Stock real BC − Stock teorico**. `%` = desvío / teorico × 100. Semáforo: verde ≤0,5%; amarillo ≤1%; rojo >1% (teorico=0 y real≠0 → rojo) |
-| **CHECK cajas** | Por producto y global: **real − teórico**. 0 = cuadrado; &lt;0 falta real; &gt;0 exceso real |
-| **Estado cajas A/B/C** | **A** total=0 y todos CHECK=0 (verde). **B** total=0 con algún CHECK≠0 → «Desvío por producto compensado» (amarillo). **C** total≠0 (rojo) |
+| **CHECK cajas** | Por producto y global: **real − teórico**. 0 = cuadrado; &lt;0 falta real; &gt;0 exceso real. Teórico usa **1 lote = 1 caja** (no COUNT(*) packs) |
+| **CHECK kg** | **real − teórico** (misma convención; independiente pero comparable) |
+| **Estado A/B/C/D** | **A** correcto. **B** total cajas 0 con productos ≠0. **C** total cajas ≠0. **D** cajas ≠0 y kg ≈0 (inconsistencia) |
 | **Producto (Innova→BC)** | Si el lote está en ILE → **Item No. BC**. Conversion solo si el lote es solo-Innova |
-| **Pares ±X** | Productos con CHECK opuesto de la misma magnitud: posible mapeo distinto; no ocultan el detalle |
+| **Pares ±X** | Solo con evidencia de lote (Conversion ≠ Item No.); no por suma matemática |
 | **Merma peso (Innova - BC)** | Kg Innova enlazado − kg BC del mismo lote (desvio de bascula; **no** sustituye el desvío de stock) |
 | **Alcance desvío** | Por producto y etapa (Inicial / Producción / Salidas / Ajustes / Stock final) |
 | **Historico ILE** | Consultas acotadas desde **2026-01-01** (`[Posting Date]` / `[Fecha empaque]`) para evitar timeout en BC |
@@ -656,9 +668,9 @@ Almacenes **E**, **G** y **Z**. Agregado por Cod. producto / `[Item No.]` en **c
 
 Misma definición en **diario, semanal y mensual** (solo cambian las fechas inicio/fin del informe).
 
-En **Balance BC E/G/Z**: teórico = inicial BC + Innova CAJA − primera salida; real = snapshot BC; desvío kg = real − teórico con semáforo ±0,5% / ±1%.
+En **Balance BC E/G/Z**: teórico = inicial BC + Innova CAJA − primera salida; real = snapshot BC; desvío kg = real − teórico con semáforo ±0,5% / ±1%. Tabla **CHECK kg por producto** con la misma fórmula.
 
-En **Balance por tipo (cajas)**: CHECK = real − teórico. Estados **A** (correcto), **B** (total 0 pero productos con CHECK ≠ 0: desvío por producto compensado), **C** (total ≠ 0). Producto: Item No. BC si el lote está en ILE; conversion solo para solo-Innova. Los pares ±X se listan aparte sin ocultar el detalle.
+En **Balance por tipo (cajas)**: CHECK = real − teórico; teórico = 1 lote Innova = 1 caja. Estados **A/B/C/D**. Pares ±X solo con evidencia de lote. Ver [docs/KPI_DEFINICIONES.md](docs/KPI_DEFINICIONES.md).
 
 ### Acceso multi-usuario Innova
 
