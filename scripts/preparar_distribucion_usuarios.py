@@ -21,6 +21,7 @@ FILES = [
     ".env.example",
     ".gitignore",
     "PREMISAS.md",
+    "FUNCIONAMIENTO.md",
     "INSTRUCCIONES.md",
     "README.md",
     "stolt_logo.svg",

@@ -1,6 +1,15 @@
 # Cambios locales — CALCULO_BIOMASA
 
-Registro de cambios guardados **en local** (commit Git).
+Historial breve. La lógica vigente está en [FUNCIONAMIENTO.md](../FUNCIONAMIENTO.md) y [PREMISAS.md](../PREMISAS.md); no reescribir reglas aquí.
+
+---
+
+## 2026-08-14 — Documentación limpia (sin solapes)
+
+- Nuevo **FUNCIONAMIENTO.md** (flujo, balances, pestañas, lectura de desvíos).
+- README / INSTRUCCIONES / docs/README alineados: un rol por fichero.
+- PREMISAS y KPI: estados A–D, 1 lote = 1 caja, producción = Innova ∩ BC.
+- Informes regenerados junio/julio 2026 con lógica actual.
 
 ---
 

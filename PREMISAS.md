@@ -1,6 +1,10 @@
 # Premisas de calculo de biomasa
 
-Documento canonico del proyecto **CALCULO_BIOMASA**. Cualquier cambio en reglas de negocio debe actualizarse aqui y en `generar_reporte_biomasa.py` (constantes `PREMISA_*` y `SQL_*`).
+Documento **canonico de reglas de negocio** del proyecto **CALCULO_BIOMASA**.  
+Narrativa de funcionamiento (flujo, pestañas, lectura de desvíos): [FUNCIONAMIENTO.md](FUNCIONAMIENTO.md).  
+Glosario CHECK / estados: [docs/KPI_DEFINICIONES.md](docs/KPI_DEFINICIONES.md).
+
+Cualquier cambio de regla debe actualizarse aqui y en `generar_reporte_biomasa.py` (constantes `PREMISA_*` y `SQL_*`).
 
 ## Terminologia planta
 
@@ -24,9 +28,9 @@ Documento canonico del proyecto **CALCULO_BIOMASA**. Cualquier cambio en reglas 
 | 5 | **Merma** — balance: Entradas TINA − Salidas CAJA − Stock de tinas | Confirmada (implementada) |
 | 6 | **Cruce BC / pedidos** — enlace por lote; ventas ILE; pedido desde albaran | Confirmada (implementada) |
 | 7 | Stock inventario / arrastre | Pendiente |
-| 8 | **Balance BC E/G/Z** — stock kg/cajas: teórico = inicial + Innova CAJA − 1ª salida; CHECK/desvío = real − teórico; estados A/B/C en cajas; Item No. BC prioriza; merma peso; auditoría ILE | Confirmada (implementada) |
+| 8 | **Balance BC E/G/Z** — stock kg/cajas: teórico = inicial + Producción (Salidas CAJA) − 1ª salida; CHECK = real − teórico; **1 lote = 1 caja**; estados A/B/C/D; Item No. BC prioriza; merma peso; auditoría ILE | Confirmada (implementada) |
 
-> Proyecto operativo / cerrado documentalmente: ver **INSTRUCCIONES.md** (checklist de cierre). Premisa 7 (arrastre inventario) sigue pendiente de negocio.
+> Proyecto operativo. Premisa 7 (arrastre inventario entre meses) sigue pendiente de negocio.
 
 ---
 
@@ -413,9 +417,9 @@ Cruce **por lote/caja** entre salidas Innova y ventas en Business Central (BC). 
 | **Filtro periodo BC** | `[Posting Date]` del ILE dentro del rango del informe |
 | **Cruce temporal** | **Por lote**, no por fecha: la contabilizacion BC puede ser otro dia del mes |
 
-> **Implementacion actual en codigo:** el detalle Innova del cruce agrupa lotes por `proc_packs.regtime` (legacy). Las **metricas de salida del periodo** usaran `prday` (premisa 3) cuando se actualice el script; el **enlace y la logica BC** no cambian.
+> **Implementacion:** enlace por lote (`number` = `Lot No.`); metricas de salida CAJA del periodo por `prday` (premisa 3). Con `BC_SOURCE=api`, kilos/`prday` se enriquecen desde Innova.
 
-### Premisa hibrida (plan API BC + enriquecimiento Innova)
+### Premisa hibrida (API BC + enriquecimiento Innova)
 
 Objetivo: si BC se consume por **API** (sin campos custom `[Fecha empaque]` / `[Kilos]`), enriquecer cada lote con Innova uniendo por el mismo codigo de lote.
 
@@ -602,7 +606,7 @@ Con **SQL BC**: la base de empaque puede salir de `[Fecha empaque]` en E/G; el e
 | **Stock final teorico** | **Stock inicial BC + Producción Innova CAJA − Primera salida BC** (igual en **kg** y en **cajas**) |
 | **Stock final real** | Snapshot BC E/G/Z: empaque **hasta** ese dia y sin Type 1/3 hasta ese dia (incluye arrastre; kg del lote; 1 lote = 1 caja) |
 | **Encadenamiento** | Stock final teorico del dia N = stock inicial teorico del dia N+1 |
-| **Producción (Salidas CAJA)** | Teórico = **todas** las Salidas CAJA Innova. Comparativa aparte: Innova CAJA vs altas/empaque BC E/G/Z |
+| **Producción (Salidas CAJA)** | Lotes con Salida CAJA Innova en el periodo **y** presentes en ILE E/G/Z (coincidencia de lote). Solo-Innova no entra |
 | **Primera salida** | Primera venta o ajuste negativo del lote (Entry Type 1 o 3) ese dia — **una sola vez** |
 | **Ajustes negativos** | ILE `[Entry Type] = 3`: con Type 1 definen la **primera salida** del lote. No restan `ABS(Quantity)` aparte en el balance de stock |
 | **Stock apertura** | Producción anterior al periodo sin venta previa en E/G/Z |
@@ -631,7 +635,7 @@ La tabla del informe incluye **todos los dias del mes** (laborables y fines de s
 | Nivel | Clave | Campos |
 |-------|-------|--------|
 | **Tipo producto** | ILE `[Item No.]` (prioridad) | Fallback: Conversion `Cod. bascula` = material Innova; luego `pattern` |
-| **Balance por tipo (cajas)** | Por `[Item No.]` / Cod. producto | CHECK = real − teórico; estados A/B/C; Item No. BC prioriza sobre conversion |
+| **Balance por tipo (cajas)** | Por `[Item No.]` / Cod. producto | CHECK = real − teórico; estados A/B/C/D; Item No. BC prioriza sobre conversion |
 | **Movimientos ILE (auditoría)** | Por `[Item No.]` | `Inicial + Type 2 − Type 1 − Type 3` con `ABS(Quantity)` y `ABS(Kilos)`; check puede ≠ 0 |
 | **Item BC** | `[Item No.]` / `[Description]` en ILE | Fuente principal del desglose stock/balance E/G/Z |
 | **Conversion** | `bc.[Conversion productos]` | Solo si el lote no trae Item No. |

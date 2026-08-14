@@ -1,12 +1,16 @@
 # Documentación CALCULO_BIOMASA
 
-| Documento | Descripción |
-|-----------|-------------|
-| [../INSTRUCCIONES.md](../INSTRUCCIONES.md) | Manual de uso y funcionamiento |
-| [../PREMISAS.md](../PREMISAS.md) | Reglas de negocio |
-| [../README.md](../README.md) | Despliegue Windows y resumen |
-| [CAMBIOS_LOCAL.md](CAMBIOS_LOCAL.md) | Historial de cambios guardados en local |
-| [BC_API_AL_CONTRACT.md](BC_API_AL_CONTRACT.md) | Recomendación API BC (evitar errores; no es petición a IT) |
+Cada documento tiene **un rol**. No duplicar reglas entre ficheros: enlazar.
+
+| Documento | Rol |
+|-----------|-----|
+| [../FUNCIONAMIENTO.md](../FUNCIONAMIENTO.md) | Cómo funciona el sistema |
+| [../INSTRUCCIONES.md](../INSTRUCCIONES.md) | Instalación y uso |
+| [../PREMISAS.md](../PREMISAS.md) | Reglas de negocio + SQL |
+| [../README.md](../README.md) | Entrada + despliegue |
+| [KPI_DEFINICIONES.md](KPI_DEFINICIONES.md) | Glosario CHECK / estados / columnas |
+| [CAMBIOS_LOCAL.md](CAMBIOS_LOCAL.md) | Historial de cambios |
+| [BC_API_AL_CONTRACT.md](BC_API_AL_CONTRACT.md) | API BC (evitar v2.0 sin lote) |
 | `CREDENCIALES_LOCAL.md` | Credenciales del puesto (**gitignored**) |
 
-Scripts de alta de usuarios Innova: `../scripts/crear_usuario_innova_biomasa.py`.
+Scripts: `../scripts/` — ver [../scripts/README.md](../scripts/README.md).
